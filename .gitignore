@@ -1,0 +1,52 @@
+
+# Node.js
+node_modules/
+.tanstack/
+.output/
+dist/
+.env.local
+
+# ... existing Python ignores
+# Environment variables (sensitive)
+.env
+
+# Virtual environment
+knowledgedb/
+venv/
+env/
+ENV/
+
+# Python compiled files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+*.so
+*.egg
+*.egg-info/
+build/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Gmail OAuth tokens (sensitive)
+token.json
+credentials.json
+
+# Database
+*.db
+*.sqlite
+
+# LLM
+.qwen

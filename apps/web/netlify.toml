@@ -1,0 +1,12 @@
+[build]
+  base = "."
+  command = "pnpm install && pnpm web build"
+  publish = "apps/web/.output/public"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
