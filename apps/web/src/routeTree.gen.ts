@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as PocketRouteImport } from './routes/pocket'
 import { Route as McpRouteImport } from './routes/mcp'
 import { Route as AboutRouteImport } from './routes/about'
 import { Route as IndexRouteImport } from './routes/index'
@@ -25,6 +26,11 @@ import { Route as DemoFormAddressRouteImport } from './routes/demo/form.address'
 import { Route as DemoApiMcpTodosRouteImport } from './routes/demo/api.mcp-todos'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 
+const PocketRoute = PocketRouteImport.update({
+  id: '/pocket',
+  path: '/pocket',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const McpRoute = McpRouteImport.update({
   id: '/mcp',
   path: '/mcp',
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/mcp': typeof McpRoute
+  '/pocket': typeof PocketRoute
   '/demo/better-auth': typeof DemoBetterAuthRoute
   '/demo/db-chat': typeof DemoDbChatRoute
   '/demo/db-chat-api': typeof DemoDbChatApiRoute
@@ -122,6 +129,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/mcp': typeof McpRoute
+  '/pocket': typeof PocketRoute
   '/demo/better-auth': typeof DemoBetterAuthRoute
   '/demo/db-chat': typeof DemoDbChatRoute
   '/demo/db-chat-api': typeof DemoDbChatApiRoute
@@ -140,6 +148,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/about': typeof AboutRoute
   '/mcp': typeof McpRoute
+  '/pocket': typeof PocketRoute
   '/demo/better-auth': typeof DemoBetterAuthRoute
   '/demo/db-chat': typeof DemoDbChatRoute
   '/demo/db-chat-api': typeof DemoDbChatApiRoute
@@ -159,6 +168,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/mcp'
+    | '/pocket'
     | '/demo/better-auth'
     | '/demo/db-chat'
     | '/demo/db-chat-api'
@@ -176,6 +186,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/mcp'
+    | '/pocket'
     | '/demo/better-auth'
     | '/demo/db-chat'
     | '/demo/db-chat-api'
@@ -193,6 +204,7 @@ export interface FileRouteTypes {
     | '/'
     | '/about'
     | '/mcp'
+    | '/pocket'
     | '/demo/better-auth'
     | '/demo/db-chat'
     | '/demo/db-chat-api'
@@ -211,6 +223,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AboutRoute: typeof AboutRoute
   McpRoute: typeof McpRoute
+  PocketRoute: typeof PocketRoute
   DemoBetterAuthRoute: typeof DemoBetterAuthRoute
   DemoDbChatRoute: typeof DemoDbChatRoute
   DemoDbChatApiRoute: typeof DemoDbChatApiRoute
@@ -227,6 +240,13 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/pocket': {
+      id: '/pocket'
+      path: '/pocket'
+      fullPath: '/pocket'
+      preLoaderRoute: typeof PocketRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/mcp': {
       id: '/mcp'
       path: '/mcp'
@@ -339,6 +359,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AboutRoute: AboutRoute,
   McpRoute: McpRoute,
+  PocketRoute: PocketRoute,
   DemoBetterAuthRoute: DemoBetterAuthRoute,
   DemoDbChatRoute: DemoDbChatRoute,
   DemoDbChatApiRoute: DemoDbChatApiRoute,

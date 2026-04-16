@@ -1,28 +1,45 @@
 # Pocket
 
-**Mobile-first self-hosted autonomous coding agent.**
+Self-hosted autonomous coding agent. Chat with an AI to work on GitHub repos.
 
-Ship code, review diffs, and merge fixes from your phone. Describe a task, lock your device, and return to a ready PR.
+## Install
 
-## Status
+```bash
+pnpm install
+cp .env.example .env
+# Edit .env with OPENROUTER_API_KEY and GITHUB_TOKEN
+```
 
-Setup pending. See [docs/Overview.md](docs/Overview.md) for full documentation.
+## Run
 
-## Quick Start
+```bash
+pnpm dev        # Both server + frontend
+# Or:
+pnpm server     # Backend on :8080
+pnpm web:dev    # Frontend on :3000
+```
 
-*(Pending setup implementation)*
+Access: http://localhost:3000/pocket
 
-## Documentation
+## Use
+
+1. Paste GitHub repo URL
+2. Enter task description
+3. Clone → Create Branch
+4. Chat with agent
+5. PR created to `pocket` branch
+
+## Test
+
+```bash
+pnpm --filter pocket-server test   # Server (41 tests)
+pnpm --filter web test            # Web (4 tests)
+```
+
+## Docs
 
 | Document | Description |
 |----------|-------------|
-| [Overview](docs/Overview.md) | Product purpose, code philosophy, directory map |
-| [Architecture](docs/Architecture.md) | Technical architecture and layers |
-| [User Stories](docs/UserStories.md) | Core use cases and workflows |
-
-## Key Features
-
-- **Mobile-first** — Task creation and PR review from any device
-- **Self-hosted** — No external sandbox vendors, runs on your infrastructure
-- **Async durable** — Tasks survive app close, phone lock, network interruptions
-- **PR-native** — Every task results in a GitHub PR with full audit trail
+| [Overview](docs/Overview.md) | Quick reference |
+| [Architecture](docs/Architecture.md) | Technical details |
+| [Tunnel Setup](docs/Tunnel.md) | Remote access |

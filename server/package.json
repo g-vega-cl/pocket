@@ -1,0 +1,21 @@
+{
+  "name": "pocket-server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.0",
+    "octokit": "^4.1.4",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.7"
+  }
+}

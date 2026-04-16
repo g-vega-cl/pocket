@@ -10,11 +10,16 @@
     "web": "pnpm --filter web",
     "web:dev": "pnpm --filter web dev",
     "web:build": "pnpm --filter web build",
+    "server": "node server/index.js",
+    "server:dev": "node --watch server/index.js",
+    "dev": "concurrently \"pnpm server:dev\" \"pnpm web:dev\"",
     "ingest": "cd services/ingestion && python ingest.py",
     "query": "cd services/ingestion && python query.py"
   },
   "devDependencies": {
-    "pnpm": "10.15.0"
+    "concurrently": "^8.2.2",
+    "pnpm": "10.15.0",
+    "vitest": "^3.2.4"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
