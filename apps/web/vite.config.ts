@@ -9,6 +9,14 @@ import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 const config = defineConfig({
+  server: {
+    proxy: {
+      '/ws': {
+        target: 'http://localhost:5173',
+        ws: true,
+      },
+    },
+  },
   plugins: [
     devtools(),
     tsconfigPaths({ projects: ['./tsconfig.json'] }),
