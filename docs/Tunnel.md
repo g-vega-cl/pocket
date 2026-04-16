@@ -5,7 +5,7 @@ Access Pocket remotely via Cloudflare tunnel at `bolt.clvg.uk`.
 ## Quick Setup
 
 ```bash
-cloudflared tunnel --url http://localhost:8080
+cloudflared tunnel --url http://localhost:5173
 ```
 
 ## Permanent Setup
@@ -26,7 +26,7 @@ cloudflared tunnel --url http://localhost:8080
    credentials-file: /root/.cloudflared/<id>.json
    ingress:
      - hostname: bolt.clvg.uk
-       service: http://localhost:8080
+       service: http://localhost:5173
      - service: http_status:404
    ```
 
