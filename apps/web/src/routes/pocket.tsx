@@ -27,6 +27,7 @@ function PocketApp() {
   const [task, setTask] = useState('');
   const [inputValue, setInputValue] = useState('');
   const [sessionIdInput, setSessionIdInput] = useState('');
+  const [selectedModel, setSelectedModel] = useState('minimax/minimax-m2.5:free');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -57,7 +58,7 @@ function PocketApp() {
   const handleSendMessage = (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!inputValue.trim() || !session?.id || isLoading) return;
-    sendMessage(session.id, inputValue);
+    sendMessage(session.id, inputValue, selectedModel);
     setInputValue('');
   };
 
@@ -291,6 +292,15 @@ function PocketApp() {
 
         {session?.status === 'ready' && (
           <form onSubmit={handleSendMessage} className="border-t dark:border-gray-700 p-4">
+            <div className="flex items-center gap-2 mb-2">
+              <input
+                type="text"
+                value={selectedModel}
+                onChange={(e) => setSelectedModel(e.target.value)}
+                placeholder="Model (e.g. minimax/minimax-m2.5:free)"
+                className="flex-1 px-3 py-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
+              />
+            </div>
             <div className="flex gap-2">
               <textarea
                 ref={inputRef}

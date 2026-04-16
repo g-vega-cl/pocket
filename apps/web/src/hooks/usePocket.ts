@@ -255,9 +255,9 @@ export function usePocket(wsUrl: string) {
   );
 
   const sendMessage = useCallback(
-    (sessionId: string, content: string) => {
+    (sessionId: string, content: string, model?: string) => {
       setState((prev) => ({ ...prev, isLoading: true }));
-      send({ type: 'chat', sessionId, payload: { content } });
+      send({ type: 'chat', sessionId, payload: { content, model } });
     },
     [send]
   );

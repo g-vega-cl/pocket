@@ -124,8 +124,7 @@ function buildToolDefinitions() {
   ];
 }
 
-async function streamChat(messages, onChunk, onToolCall) {
-  const model = DEFAULT_MODEL;
+async function streamChat(messages, onChunk, onToolCall, model = DEFAULT_MODEL) {
 
   const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
     method: 'POST',

@@ -156,7 +156,7 @@ async function handleMessage(ws, message) {
         return;
       }
 
-      const { content } = payload;
+      const { content, model } = payload;
 
       addToHistory(sessionId, { role: 'user', content });
       send(ws, { type: 'user_message', content });
@@ -186,7 +186,8 @@ async function handleMessage(ws, message) {
             }
             send(ws, { type: 'tool_result', tool: toolCall.name, result });
           }
-        }
+        },
+        model
       );
 
       addToHistory(sessionId, { role: 'assistant', content: fullResponse });
