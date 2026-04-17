@@ -51,6 +51,7 @@ type ServerMessage =
   | { type: 'tool_start'; tool: string; args: Record<string, unknown> }
   | { type: 'tool_result'; tool: string; result: unknown }
   | { type: 'done'; prUrl?: string | null }
+  | { type: 'debug'; data: unknown }
   | { type: 'error'; error: string }
   | { type: 'aborted' };
 
@@ -198,6 +199,9 @@ export function usePocket(wsUrl: string) {
         }));
         break;
 
+      case 'debug':
+        break;
+
       case 'error':
         setState((prev) => ({
           ...prev,
@@ -272,6 +276,20 @@ export function usePocket(wsUrl: string) {
     wsRef.current = null;
   }, []);
 
+  const commit = useCallback(
+    (sessionId: string) => {
+      send({ type: 'commit', sessionId });
+    },
+    [send]
+  );
+
+  const createPR = useCallback(
+    (sessionId: string) => {
+      send({ type: 'create_pr', sessionId });
+    },
+    [send]
+  );
+
   useEffect(() => {
     connect();
     return () => disconnect();
@@ -284,6 +302,8 @@ export function usePocket(wsUrl: string) {
     clone,
     createBranch,
     sendMessage,
+    commit,
+    createPR,
     disconnect,
   };
 }

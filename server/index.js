@@ -163,8 +163,9 @@ async function handleMessage(ws, message) {
       addToHistory(sessionId, { role: 'user', content });
       send(ws, { type: 'user_message', content });
 
+const repoName = session.repoUrl.split('/').pop().replace('.git', '');
       const messages = [
-        buildSystemMessage(session.branchName, session.task),
+        buildSystemMessage(session.branchName, session.task, repoName, session.localPath),
         ...session.history.map(m => ({ role: m.role, content: m.content })),
       ];
 
@@ -180,15 +181,16 @@ async function handleMessage(ws, message) {
           if (toolCall.status === 'start') {
             send(ws, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
           } else if (toolCall.status === 'complete') {
-            let result;
-            try {
-              result = await executeTool(session.localPath, toolCall.name, toolCall.arguments);
-            } catch (error) {
-              result = { error: error.message };
-            }
-            send(ws, { type: 'tool_result', tool: toolCall.name, result });
+            // Tool call streaming complete - waiting for execution
+          } else if (toolCall.status === 'result') {
+            // Tool execution result from llm.js
+            send(ws, { type: 'tool_result', tool: toolCall.name, result: toolCall.result });
           }
         },
+        async (toolName, args) => {
+          return await executeTool(session.localPath, toolName, args);
+        },
+        (raw) => send(ws, { type: 'debug', data: raw }),
         model
       );
 
@@ -213,7 +215,64 @@ async function handleMessage(ws, message) {
         console.error('Auto-push/PR failed:', error.message);
       }
 
-      send(ws, { type: 'done', prUrl });
+      send(ws, { type: 'status', status: 'ready', message: 'Ready for more!', prUrl });
+      break;
+    }
+
+    case 'commit': {
+      const session = getSession(sessionId);
+      if (!session) {
+        send(ws, { type: 'error', error: 'Session not found' });
+        return;
+      }
+
+      if (!session.localPath || !session.branchName) {
+        send(ws, { type: 'error', error: 'Repository not ready' });
+        return;
+      }
+
+      try {
+        const { dirty } = await gitStatus(session.localPath);
+        if (!dirty) {
+          send(ws, { type: 'status', status: 'ready', message: 'No changes to commit' });
+          return;
+        }
+
+        send(ws, { type: 'status', status: 'working', message: 'Committing changes...' });
+        await gitCommit(session.localPath, `Pocket: ${session.task}`);
+        send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
+        await gitPush(session.localPath, session.branchName);
+        send(ws, { type: 'status', status: 'ready', message: 'Committed and pushed!' });
+      } catch (error) {
+        send(ws, { type: 'error', error: error.message });
+      }
+      break;
+    }
+
+    case 'create_pr': {
+      const session = getSession(sessionId);
+      if (!session) {
+        send(ws, { type: 'error', error: 'Session not found' });
+        return;
+      }
+
+      if (!session.localPath || !session.branchName) {
+        send(ws, { type: 'error', error: 'Repository not ready' });
+        return;
+      }
+
+      try {
+        send(ws, { type: 'status', status: 'working', message: 'Creating pull request...' });
+        const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}`);
+        if (prResult.prUrl) {
+          updateSession(sessionId, { prUrl: prResult.prUrl });
+          send(ws, { type: 'status', status: 'ready', message: 'PR created!', prUrl: prResult.prUrl });
+        } else {
+          send(ws, { type: 'status', status: 'ready', message: 'PR creation failed: ' + prResult.error });
+        }
+      } catch (error) {
+        send(ws, { type: 'error', error: error.message });
+      }
       break;
     }
 

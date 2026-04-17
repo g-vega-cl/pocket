@@ -4,9 +4,12 @@ const DEFAULT_MODEL = 'openrouter/elephant-alpha';
 
 const SYSTEM_PROMPT = `You are Pocket, an autonomous coding agent.
 
-The repository has been cloned and you're on branch: {branchName}
+Repository "{repoName}" has been cloned to: {localPath}
+You're on branch: {branchName}
 
 Your task: {taskDescription}
+
+CRITICAL RULE: When asked about the repository or its contents, you MUST call run_command("ls -la") and read_file("README.md") FIRST before answering. Do not describe the repo from memory - you must explore it using these tools.
 
 Rules:
 - Read files to understand the codebase
@@ -15,7 +18,7 @@ Rules:
 - When done: git_commit → git_push → github_create_pr
 
 AVAILABLE TOOLS:
-- read_file(path) - Read a file, returns content
+- read_file(path) - Read a file, returns content (use absolute path: {localPath}/<path>)
 - write_file(path, content) - Write/modify a file
 - run_command(cmd) - Execute a shell command
 - git_commit(message) - Commit staged changes
@@ -27,12 +30,14 @@ IMPORTANT: Always commit and push before creating PR. PR title should be concise
 Do NOT clone or create branches. That is already done.
 `;
 
-function buildSystemMessage(branchName, taskDescription) {
+function buildSystemMessage(branchName, taskDescription, repoName, localPath) {
   return {
     role: 'system',
     content: SYSTEM_PROMPT
       .replace('{branchName}', branchName)
-      .replace('{taskDescription}', taskDescription),
+      .replace('{taskDescription}', taskDescription)
+      .replace('{repoName}', repoName)
+      .replace('{localPath}', localPath),
   };
 }
 
@@ -124,108 +129,144 @@ function buildToolDefinitions() {
   ];
 }
 
-async function streamChat(messages, onChunk, onToolCall, model = DEFAULT_MODEL) {
+async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, model = DEFAULT_MODEL) {
+  const allMessages = [...messages];
 
-  const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${OPENROUTER_API_KEY}`,
-      'HTTP-Referer': 'https://pocket.local',
-      'X-Title': 'Pocket',
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      tools: buildToolDefinitions(),
-      stream: true,
-      max_tokens: 4096,
-    }),
-  });
+  async function makeRequest(reqMessages) {
+    const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${OPENROUTER_API_KEY}`,
+        'HTTP-Referer': 'https://pocket.local',
+        'X-Title': 'Pocket',
+      },
+      body: JSON.stringify({
+        model,
+        messages: reqMessages,
+        tools: buildToolDefinitions(),
+        stream: true,
+        max_tokens: 4096,
+      }),
+    });
 
-  if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`OpenRouter error: ${response.status} - ${error}`);
-  }
+    if (!response.ok) {
+      const error = await response.text();
+      throw new Error(`OpenRouter error: ${response.status} - ${error}`);
+    }
 
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-  let currentToolCall = null;
-  let currentToolArgs = '';
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let currentToolCall = null;
+    let currentToolArgs = '';
+    let currentToolCallId = null;
+    let assistantMessage = '';
+    let finishReason = null;
 
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || '';
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const data = line.slice(6);
-      if (data === '[DONE]') continue;
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') continue;
 
-      try {
-        const parsed = JSON.parse(data);
-        const delta = parsed.choices?.[0]?.delta;
+        try {
+          const parsed = JSON.parse(data);
+          const delta = parsed.choices?.[0]?.delta;
+          finishReason = parsed.choices?.[0]?.finish_reason;
 
-        if (delta?.content) {
-          const text = typeof delta.content === 'string'
-            ? delta.content
-            : delta.content[0]?.text;
-          if (text) {
-            onChunk(text);
+          if (onRaw) onRaw(parsed);
+
+          if (delta?.content && typeof delta.content === 'string' && delta.content) {
+            assistantMessage += delta.content;
+            onChunk(delta.content);
           }
-          if (delta.content[0]?.type === 'tool_use') {
-            const toolContent = delta.content[0];
-            const tool = toolContent.name;
-            const args = toolContent.input || {};
 
-            if (currentToolCall !== tool) {
-              if (currentToolCall) {
+          if (delta?.tool_calls && delta.tool_calls.length > 0) {
+            const toolCallDelta = delta.tool_calls[0];
+            if (toolCallDelta?.function?.name) {
+              if (currentToolCall && currentToolCall !== toolCallDelta.function.name) {
                 onToolCall({
                   name: currentToolCall,
                   arguments: JSON.parse(currentToolArgs || '{}'),
                   status: 'complete',
                 });
               }
-              currentToolCall = tool;
-              currentToolArgs = JSON.stringify(args);
-              onToolCall({
-                name: tool,
-                arguments: args,
-                status: 'start',
-              });
-            } else {
-              currentToolArgs = JSON.stringify(args);
+              if (!currentToolCall || currentToolCall !== toolCallDelta.function.name) {
+                currentToolCall = toolCallDelta.function.name;
+                currentToolCallId = toolCallDelta.id;
+                currentToolArgs = '';
+                onToolCall({
+                  name: toolCallDelta.function.name,
+                  arguments: {},
+                  status: 'start',
+                });
+              }
+            }
+            if (toolCallDelta?.function?.arguments) {
+              currentToolArgs += toolCallDelta.function.arguments;
             }
           }
-        }
 
-        if (parsed.choices?.[0]?.finish_reason === 'tool_calls') {
-          if (currentToolCall) {
-            onToolCall({
-              name: currentToolCall,
-              arguments: JSON.parse(currentToolArgs || '{}'),
-              status: 'complete',
-            });
-            currentToolCall = null;
-            currentToolArgs = '';
+          if (finishReason === 'tool_calls') {
+            if (currentToolCall) {
+              onToolCall({
+                name: currentToolCall,
+                arguments: JSON.parse(currentToolArgs || '{}'),
+                status: 'complete',
+              });
+            }
           }
+        } catch (e) {
         }
-      } catch (e) {
       }
     }
+
+    return { finishReason, assistantMessage, toolCall: currentToolCall, toolArgs: currentToolArgs, toolCallId: currentToolCallId };
   }
 
-  if (currentToolCall) {
-    onToolCall({
-      name: currentToolCall,
-      arguments: JSON.parse(currentToolArgs || '{}'),
-      status: 'complete',
-    });
+  while (true) {
+    const { finishReason, assistantMessage, toolCall, toolArgs, toolCallId } = await makeRequest(allMessages);
+
+    if (finishReason !== 'tool_calls') {
+      break;
+    }
+
+    if (toolCall) {
+      const toolResult = await executeTool(toolCall, JSON.parse(toolArgs || '{}'));
+      onToolCall({
+        name: toolCall,
+        arguments: JSON.parse(toolArgs || '{}'),
+        result: toolResult,
+        status: 'result',
+      });
+
+      allMessages.push({
+        role: 'assistant',
+        content: assistantMessage,
+        tool_calls: [{
+          id: toolCallId || `call_${Date.now()}`,
+          type: 'function',
+          function: {
+            name: toolCall,
+            arguments: toolArgs,
+          },
+        }],
+      });
+
+      allMessages.push({
+        role: 'tool',
+        tool_call_id: toolCallId || `call_${Date.now()}`,
+        content: JSON.stringify(toolResult),
+      });
+    }
   }
 }
 

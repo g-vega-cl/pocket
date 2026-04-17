@@ -26,6 +26,8 @@ function PocketApp() {
     clone,
     createBranch,
     sendMessage,
+    commit,
+    createPR,
   } = usePocket(wsUrl);
 
   const [repoUrl, setRepoUrl] = useState('');
@@ -62,7 +64,7 @@ function PocketApp() {
 
   const handleSendMessage = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputValue.trim() || !session?.id || isLoading) return;
+    if (!inputValue.trim() || !session?.id?.trim() || isLoading) return;
     sendMessage(session.id, inputValue, selectedModel);
     setInputValue('');
   };
@@ -89,7 +91,7 @@ function PocketApp() {
       case 'working':
         return 'Agent is working...';
       case 'done':
-        return 'Task complete! Check for PR link above.';
+        return 'Ready for more!';
       case 'error':
         return 'An error occurred.';
       default:
@@ -235,6 +237,33 @@ function PocketApp() {
         {error && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
             {error}
+          </div>
+        )}
+
+        {session?.status === 'ready' && (
+          <div className="mt-4 flex gap-2">
+            <button
+              onClick={() => commit(session.id)}
+              className="px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700"
+            >
+              Commit
+            </button>
+            <button
+              onClick={() => createPR(session.id)}
+              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700"
+            >
+              Create PR
+            </button>
+            {prUrl && (
+              <a
+                href={prUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+              >
+                View PR
+              </a>
+            )}
           </div>
         )}
       </div>
