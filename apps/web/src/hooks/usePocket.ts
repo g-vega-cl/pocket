@@ -39,6 +39,7 @@ interface PocketState {
   currentToolCall: ToolCall | null;
   prUrl: string | null;
   error: string | null;
+  notification: string | null;
 }
 
 type ServerMessage =
@@ -64,6 +65,7 @@ export function usePocket(wsUrl: string) {
     currentToolCall: null,
     prUrl: null,
     error: null,
+    notification: null,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -137,7 +139,14 @@ export function usePocket(wsUrl: string) {
               }
             : null,
           isLoading: ['cloning', 'creating_branch'].includes(msg.status),
+          notification: msg.message ?? null,
         }));
+
+        if (msg.message) {
+          setTimeout(() => {
+            setState((prev) => ({ ...prev, notification: null }));
+          }, 5000);
+        }
         break;
 
       case 'user_message':
