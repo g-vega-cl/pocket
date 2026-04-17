@@ -10,7 +10,7 @@ import Header from '../components/Header'
 
 import StoreDevtools from '../lib/demo-store-devtools'
 
-import PostHogProvider from '../integrations/posthog/provider'
+
 
 import TanStackQueryDevtools from '../integrations/tanstack-query/devtools'
 
@@ -56,8 +56,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
-        <PostHogProvider>
-          <Header />
+        <Header />
           {children}
           <Footer />
           <TanStackDevtools
@@ -73,7 +72,6 @@ function RootDocument({ children }: { children: React.ReactNode }) {
               TanStackQueryDevtools,
             ]}
           />
-        </PostHogProvider>
         <Scripts />
       </body>
     </html>

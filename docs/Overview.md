@@ -1,50 +1,35 @@
 # Pocket
 
-**Mobile-first self-hosted autonomous coding agent for private repositories.**
+Self-hosted autonomous coding agent. Chat with an AI to work on GitHub repos.
 
-Pocket enables developers, founders, and engineering leaders to ship code, review diffs, and merge fixes entirely from a phone. Describe a task, lock your phone, and return to a ready PR.
-
-## Code Philosophy
-
-> **Code is truth.** Documentation provides context.
-
-When code and docs conflict, trust the code. Docs exist to explain:
-- Why code was built a certain way
-- Where related documentation lives
-- The purpose and intent behind implementation choices
-
-Docs may be slightly stale; code is always ground truth.
-
-## Documentation Directory
+## Documentation
 
 | Document | Purpose |
-|----------|---------|
-| [Architecture](Architecture.md) | Technical architecture, layers, data flow, task state machine |
-| [User Stories](UserStories.md) | Core use cases: founder workflow, on-call workflow, CTO delegation |
+|---------|---------|
+| [Architecture](Architecture.md) | Technical architecture, layers, API |
+| [User Stories](UserStories.md) | Use cases |
+| [Tunnel Setup](Tunnel.md) | Cloudflare tunnel for remote access |
+| [README](../README.md) | Installation, quick start |
 
-## Core Concepts
+## How it works
 
-**Task-based over edit-based.** Unlike IDE-centric tools (Cursor, Copilot), Pocket works in async background jobs. You describe what you want, not how to edit files.
+1. Paste repo URL → Start Session
+2. Clone Repo → Create Branch (branch is pushed to origin automatically)
+3. Chat with agent → Changes are auto-committed after each response
+4. Use "Commit" to manually commit anytime, "Create PR" to create a pull request
+5. Continue chatting or start a new session
 
-**Mobile-first review.** Diffs are surfaced as file summary cards, not raw terminal output. Progress is a timeline, not a terminal log.
-
-**Self-hosted.** No external sandbox vendors. Code executes on your own infrastructure.
-
-**PR-native.** Every task result is a GitHub PR, with full audit trail and code review workflow.
-
-## Key Workflow
-
-```
-describe task → lock phone → background execution → PR ready → review/merge from phone
-```
-
-## Repository Structure
+## Architecture
 
 ```
-pocket/
-├── docs/
-│   ├── Overview.md      # This file
-│   ├── Architecture.md  # Technical architecture
-│   └── UserStories.md   # User narratives
-└── README.md            # Quick-start guide
+Browser → WebSocket Server → OpenRouter (LLM)
+                    ↓
+            Git + Filesystem + GitHub API
 ```
+
+## Tech Stack
+
+- **Frontend:** React (TanStack Router)
+- **Backend:** Node.js + Express + WebSocket
+- **LLM:** OpenRouter
+- **GitHub:** Octokit + Git CLI

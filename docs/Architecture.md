@@ -1,129 +1,101 @@
 # Architecture
 
-Technical architecture for Pocket, organized in four layers.
-
-## Layer Overview
+## Layers
 
 ```
-┌─────────────────────────────────────┐
-│  Layer 1: Mobile Client (PWA)       │  Task creation, progress timeline, diff review
-├─────────────────────────────────────┤
-│  Layer 2: API Gateway               │  Auth, GitHub OAuth, task endpoints, SSE streams
-├─────────────────────────────────────┤
-│  Layer 3: Job Orchestrator          │  Queue, checkpoints, retries, state machine
-├─────────────────────────────────────┤
-│  Layer 4: Intercomputer             │  Sandbox communication, tool protocol
-└─────────────────────────────────────┘
+Frontend (React) → WebSocket Server → Tools (Git, Files, GitHub)
 ```
 
-## Layer 1: Mobile Client
+## Frontend
 
-Responsibilities:
-- Task composer (repo selection, branch target, natural-language description)
-- Live progress feed via SSE
-- Mobile diff review with file summary cards
-- Merge actions
-- Follow-up prompt handling
+`apps/web/src/routes/pocket.tsx` - Chat UI
+`apps/web/src/hooks/usePocket.ts` - WebSocket client
 
-Implementation: Progressive Web App (PWA) for cross-platform mobile access.
+## Backend
 
-## Layer 2: API Gateway
+`server/index.js` - WebSocket + Express server
+`server/sessions.js` - In-memory session store
+`server/llm.js` - OpenRouter client
 
-Responsibilities:
-- GitHub OAuth authentication
-- Repository permission validation
-- Task CRUD operations
-- Server-Sent Events for progress streaming
-- Push notification triggers
+### LLM Client (llm.js)
 
-### Endpoints
+The `streamChat` function handles OpenRouter's streaming API with tool calling:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/tasks` | Create new task |
-| GET | `/tasks/:id` | Get task status and details |
-| POST | `/tasks/:id/followup` | Add follow-up instruction |
-| POST | `/tasks/:id/merge` | Merge the resulting PR |
+- Supports both string and array formats for `delta.content` (various LLM providers return different formats)
+- Accumulates tool arguments across streaming chunks
+- Handles `delta.tool_calls` format for tool call streaming
+- Calls `onChunk` for text tokens and `onToolCall` for tool use (start/complete)
+- Multi-turn tool execution: when LLM requests a tool, executes it via `executeTool` callback and feeds result back to LLM
+- Calls `onRaw` with raw parsed data for debugging
 
-## Layer 3: Job Orchestrator
-
-Responsibilities:
-- Job queue management
-- Persistent checkpoints for resumable execution
-- Replay failed jobs from last successful checkpoint
-- Safe step retry logic
-- Branch locking to prevent conflicts
-- Concurrency limits per repo
-- Task state machine
-
-### State Machine
-
-```
-QUEUED → PLANNING → EXECUTING → TESTING → PR_CREATED → AWAITING_REVIEW → MERGED
-                   ↓                    ↓
-               RETRYING            FAILED
-                   ↓
-                FAILED
+```typescript
+streamChat(
+  messages: {role: string, content: string}[],
+  onChunk: (text: string) => void,
+  onToolCall: (toolCall: {name, arguments, status, result?}) => void,
+  executeTool: (toolName: string, args: object) => Promise<object>,
+  onRaw?: (data: object) => void,
+  model?: string
+)
 ```
 
-| State | Description |
-|-------|-------------|
-| QUEUED | Task received, waiting for worker |
-| PLANNING | Agent analyzing task and repo |
-| EXECUTING | Making code changes |
-| TESTING | Running tests/build verification |
-| RETRYING | Attempting recovery from failure |
-| PR_CREATED | Branch pushed, PR opened |
-| AWAITING_REVIEW | Waiting for user review or merge |
-| MERGED | PR merged, task complete |
-| FAILED | Unrecoverable failure |
+**buildSystemMessage** creates the system prompt with repo context:
 
-### Task Checkpoint Data
-
-Every task persists:
-- `task_id`, `repo`, `branch`
-- `job_state`
-- `execution_steps` (completed steps)
-- `current_patch`
-- `logs`
-- `pr_url`
-- `retry_count`
-
-This enables recovery from worker restarts or network interruptions.
-
-## Layer 4: Intercomputer
-
-Responsibilities:
-- Agent communicates with user's sandbox server
-- Tool protocol for file and command operations
-- Provider-agnostic (works with any sandbox setup)
-
-### Tool Protocol
-
-```python
-read_file(path)        # Read file contents
-write_file(path, content)  # Write file
-run(command)           # Execute shell command
-git_checkout(branch)   # Switch branch
-git_commit(message)    # Commit changes
-git_push()             # Push to remote
-open_pr(title, body)   # Create GitHub PR
+```typescript
+buildSystemMessage(
+  branchName: string,
+  taskDescription: string,
+  repoName: string,
+  localPath: string
+)
 ```
 
-## Data Flow
+## Tools
 
-1. User creates task via mobile client
-2. API gateway validates auth and stores task
-3. Job orchestrator picks up task, creates checkpoint
-4. Intercomputer tool protocol executes agent on sandbox
-5. Agent edits files, runs tests, pushes branch
-6. Agent opens PR via GitHub API
-7. Progress streamed back to mobile client via SSE
-8. User reviews PR on mobile, merges from phone
+| Tool | File | Description |
+|------|------|-------------|
+| read_file | tools/file.js | Read repo files |
+| write_file | tools/file.js | Write repo files |
+| run_command | tools/command.js | Execute shell |
+| git_clone | tools/git.js | Clone GitHub repo |
+| git_create_branch | tools/git.js | Create branch |
+| git_commit | tools/git.js | Commit changes |
+| git_push | tools/git.js | Push to remote |
+| github_create_pr | tools/github.js | Create PR |
 
-## Future Considerations
+## WebSocket Protocol
 
-- Layer 5 (LLM routing intelligence) deferred to v2
-- Slack integration for task delegation
-- Voice task creation
-- Multi-agent collaboration
+Client → Server: `create_session`, `resume_session`, `clone`, `create_branch`, `chat`, `commit`, `create_pr`
+Server → Client: `session_created`, `status`, `token`, `tool_start`, `tool_result`, `debug`, `error`
+
+**Note**: `status` messages include a `message` field for feedback (e.g., "Committed and pushed!", "PR created!"). `debug` messages contain raw LLM response data for debugging.
+
+## Session
+
+```js
+{
+  id, repoUrl, task, localPath, branchName,
+  history: [{role, content}],
+  status // created|cloning|cloned|creating_branch|ready|working|done|error
+}
+```
+
+## Branch Strategy
+
+```
+main → pocket (mirror) → pocket/{timestamp}-{slug} (agent branch) → PR to pocket
+```
+
+## Automatic Flow
+
+1. **Branch Creation**: When a branch is created via `create_branch`, it is automatically pushed to origin
+2. **Post-Chat Auto-Commit**: After chat completes, any uncommitted changes are automatically committed and pushed
+3. **Manual Controls**: "Commit" and "Create PR" buttons allow manual control over when to commit and create PRs
+
+## Frontend UI
+
+The chat interface provides:
+- **Message input**: Type messages to chat with the agent
+- **Commit button**: Manually commits and pushes current changes
+- **Create PR button**: Creates a pull request to the `pocket` branch
+- **View PR link**: Appears after a PR is created
