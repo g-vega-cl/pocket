@@ -23,14 +23,30 @@ The `streamChat` function handles OpenRouter's streaming API with tool calling:
 
 - Supports both string and array formats for `delta.content` (various LLM providers return different formats)
 - Accumulates tool arguments across streaming chunks
+- Handles `delta.tool_calls` format for tool call streaming
 - Calls `onChunk` for text tokens and `onToolCall` for tool use (start/complete)
+- Multi-turn tool execution: when LLM requests a tool, executes it via `executeTool` callback and feeds result back to LLM
+- Calls `onRaw` with raw parsed data for debugging
 
 ```typescript
 streamChat(
   messages: {role: string, content: string}[],
   onChunk: (text: string) => void,
-  onToolCall: (toolCall: {name, arguments, status}) => void,
+  onToolCall: (toolCall: {name, arguments, status, result?}) => void,
+  executeTool: (toolName: string, args: object) => Promise<object>,
+  onRaw?: (data: object) => void,
   model?: string
+)
+```
+
+**buildSystemMessage** creates the system prompt with repo context:
+
+```typescript
+buildSystemMessage(
+  branchName: string,
+  taskDescription: string,
+  repoName: string,
+  localPath: string
 )
 ```
 
@@ -49,10 +65,10 @@ streamChat(
 
 ## WebSocket Protocol
 
-Client → Server: `create_session`, `resume_session`, `clone`, `create_branch`, `chat`
-Server → Client: `session_created`, `status`, `token`, `tool_start`, `tool_result`, `done`, `error`
+Client → Server: `create_session`, `resume_session`, `clone`, `create_branch`, `chat`, `commit`, `create_pr`
+Server → Client: `session_created`, `status`, `token`, `tool_start`, `tool_result`, `debug`, `error`
 
-**Note**: `done` message includes `prUrl` when a PR was created.
+**Note**: `status` messages include a `message` field for feedback (e.g., "Committed and pushed!", "PR created!"). `debug` messages contain raw LLM response data for debugging.
 
 ## Session
 
@@ -73,4 +89,13 @@ main → pocket (mirror) → pocket/{timestamp}-{slug} (agent branch) → PR to 
 ## Automatic Flow
 
 1. **Branch Creation**: When a branch is created via `create_branch`, it is automatically pushed to origin
-2. **Post-Chat**: After chat completes, any uncommitted changes are automatically committed, pushed, and a PR is created to the `pocket` branch
+2. **Post-Chat Auto-Commit**: After chat completes, any uncommitted changes are automatically committed and pushed
+3. **Manual Controls**: "Commit" and "Create PR" buttons allow manual control over when to commit and create PRs
+
+## Frontend UI
+
+The chat interface provides:
+- **Message input**: Type messages to chat with the agent
+- **Commit button**: Manually commits and pushes current changes
+- **Create PR button**: Creates a pull request to the `pocket` branch
+- **View PR link**: Appears after a PR is created
