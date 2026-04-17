@@ -83,5 +83,152 @@ describe('LLM Client', () => {
 
       expect(global.fetch).toHaveBeenCalled();
     });
+
+    it('should handle delta.content as a plain string', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const chunks = [];
+      const mockRead = vi.fn()
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello "}}]}\n'),
+        })
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"world"}}]}\n'),
+        })
+        .mockResolvedValueOnce({
+          done: true,
+          value: new Uint8Array(),
+        });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({ read: mockRead }),
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Hi' }],
+        (chunk) => chunks.push(chunk),
+        () => {}
+      );
+
+      expect(chunks).toEqual(['Hello ', 'world']);
+    });
+
+    it('should handle delta.content as an array with text type', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const chunks = [];
+      const mockRead = vi.fn()
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":[{"type":"text","text":"Hello "}]}}]}\n'),
+        })
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":[{"type":"text","text":"world"}]}}]}\n'),
+        })
+        .mockResolvedValueOnce({
+          done: true,
+          value: new Uint8Array(),
+        });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({ read: mockRead }),
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Hi' }],
+        (chunk) => chunks.push(chunk),
+        () => {}
+      );
+
+      expect(chunks).toEqual(['Hello ', 'world']);
+    });
+
+    it('should handle tool_use content type', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const toolCalls = [];
+      const mockRead = vi.fn()
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":[{"type":"tool_use","name":"read_file","input":{"path":"test.js"}}]}}]}\n'),
+        })
+        .mockResolvedValueOnce({
+          done: true,
+          value: new Uint8Array(),
+        });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({ read: mockRead }),
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Read the file' }],
+        () => {},
+        (toolCall) => toolCalls.push(toolCall)
+      );
+
+      expect(toolCalls).toContainEqual({
+        name: 'read_file',
+        arguments: { path: 'test.js' },
+        status: 'start',
+      });
+    });
+
+    it('should handle finish_reason tool_calls', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const toolCalls = [];
+      const mockRead = vi.fn()
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Reading file..."}}]}\n'),
+        })
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":[{"type":"tool_use","name":"read_file","input":{"path":"test.js"}}]}}]}\n'),
+        })
+        .mockResolvedValueOnce({
+          done: false,
+          value: new TextEncoder().encode('data: {"choices":[{"finish_reason":"tool_calls"}]}\n'),
+        })
+        .mockResolvedValueOnce({
+          done: true,
+          value: new Uint8Array(),
+        });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({ read: mockRead }),
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Read the file' }],
+        () => {},
+        (toolCall) => toolCalls.push(toolCall)
+      );
+
+      const startCall = toolCalls.find(t => t.status === 'start');
+      const completeCall = toolCalls.find(t => t.status === 'complete');
+      expect(startCall.name).toBe('read_file');
+      expect(startCall.arguments).toEqual({ path: 'test.js' });
+      expect(startCall.status).toBe('start');
+      expect(completeCall.name).toBe('read_file');
+      expect(completeCall.arguments).toEqual({ path: 'test.js' });
+      expect(completeCall.status).toBe('complete');
+    });
   });
 });

@@ -172,12 +172,16 @@ async function streamChat(messages, onChunk, onToolCall, model = DEFAULT_MODEL) 
         const delta = parsed.choices?.[0]?.delta;
 
         if (delta?.content) {
-          const content = delta.content[0];
-          if (content.type === 'text') {
-            onChunk(content.text);
-          } else if (content.type === 'tool_use') {
-            const tool = content.name;
-            const args = content.input || {};
+          const text = typeof delta.content === 'string'
+            ? delta.content
+            : delta.content[0]?.text;
+          if (text) {
+            onChunk(text);
+          }
+          if (delta.content[0]?.type === 'tool_use') {
+            const toolContent = delta.content[0];
+            const tool = toolContent.name;
+            const args = toolContent.input || {};
 
             if (currentToolCall !== tool) {
               if (currentToolCall) {
@@ -188,7 +192,7 @@ async function streamChat(messages, onChunk, onToolCall, model = DEFAULT_MODEL) 
                 });
               }
               currentToolCall = tool;
-              currentToolArgs = '';
+              currentToolArgs = JSON.stringify(args);
               onToolCall({
                 name: tool,
                 arguments: args,

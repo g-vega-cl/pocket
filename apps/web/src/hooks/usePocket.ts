@@ -69,6 +69,7 @@ export function usePocket(wsUrl: string) {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
 
   const connect = useCallback(() => {
+    if (!wsUrl) return;
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
     const ws = new WebSocket(wsUrl);
