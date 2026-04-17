@@ -7,7 +7,11 @@ export const Route = createFileRoute('/pocket')({
 });
 
 function PocketApp() {
-  const [wsUrl] = useState<string>(`ws://${window.location.host}/ws`);
+  const [wsUrl, setWsUrl] = useState<string>('');
+
+  useEffect(() => {
+    setWsUrl(`ws://${window.location.host}/ws`);
+  }, []);
 
   const {
     connected,
