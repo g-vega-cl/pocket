@@ -32,7 +32,7 @@ function PocketApp() {
   const [task, setTask] = useState('');
   const [inputValue, setInputValue] = useState('');
   const [sessionIdInput, setSessionIdInput] = useState('');
-  const [selectedModel, setSelectedModel] = useState('minimax/minimax-m2.5:free');
+  const [selectedModel, setSelectedModel] = useState('openrouter/elephant-alpha');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -316,7 +316,7 @@ function PocketApp() {
                 type="text"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
-                placeholder="Model (e.g. minimax/minimax-m2.5:free)"
+                placeholder="Model (e.g. openrouter/elephant-alpha)"
                 className="flex-1 px-3 py-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
               />
             </div>

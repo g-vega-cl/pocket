@@ -1,6 +1,6 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-const DEFAULT_MODEL = 'minimax/minimax-m2.5:free';
+const DEFAULT_MODEL = 'openrouter/elephant-alpha';
 
 const SYSTEM_PROMPT = `You are Pocket, an autonomous coding agent.
 
