@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+vi.mock('child_process', () => ({
+  execSync: vi.fn(),
+}));
+
 describe('GitHub Tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();

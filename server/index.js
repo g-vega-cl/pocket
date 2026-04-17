@@ -4,7 +4,7 @@ import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import { createSession, getSession, updateSession, addToHistory } from './sessions.js';
-import { gitClone, gitCreateBranch, gitCommit, gitPush } from './tools/git.js';
+import { gitClone, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
 import { readFile, writeFile } from './tools/file.js';
 import { runCommand } from './tools/command.js';
 import { createPullRequest } from './tools/github.js';
@@ -135,8 +135,10 @@ async function handleMessage(ws, message) {
 
       try {
         const { branchName } = await gitCreateBranch(session.localPath, session.task);
+        send(ws, { type: 'status', status: 'creating_branch', message: 'Pushing branch to origin...' });
+        await gitPush(session.localPath, branchName);
         updateSession(sessionId, { branchName, status: 'ready' });
-        send(ws, { type: 'status', status: 'ready', message: 'Branch created', branchName });
+        send(ws, { type: 'status', status: 'ready', message: 'Branch created and pushed', branchName });
       } catch (error) {
         updateSession(sessionId, { status: 'error' });
         send(ws, { type: 'error', error: `Branch creation failed: ${error.message}` });
@@ -191,7 +193,27 @@ async function handleMessage(ws, message) {
       );
 
       addToHistory(sessionId, { role: 'assistant', content: fullResponse });
-      send(ws, { type: 'done' });
+
+      let prUrl = null;
+      try {
+        const { dirty } = await gitStatus(session.localPath);
+        if (dirty) {
+          send(ws, { type: 'status', status: 'working', message: 'Committing changes...' });
+          await gitCommit(session.localPath, `Pocket: ${session.task}`);
+          send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
+          await gitPush(session.localPath, session.branchName);
+          send(ws, { type: 'status', status: 'working', message: 'Creating pull request...' });
+          const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`);
+          prUrl = prResult.prUrl;
+          if (prUrl) {
+            updateSession(sessionId, { prUrl });
+          }
+        }
+      } catch (error) {
+        console.error('Auto-push/PR failed:', error.message);
+      }
+
+      send(ws, { type: 'done', prUrl });
       break;
     }
 

@@ -35,6 +35,8 @@ Frontend (React) → WebSocket Server → Tools (Git, Files, GitHub)
 Client → Server: `create_session`, `resume_session`, `clone`, `create_branch`, `chat`
 Server → Client: `session_created`, `status`, `token`, `tool_start`, `tool_result`, `done`, `error`
 
+**Note**: `done` message includes `prUrl` when a PR was created.
+
 ## Session
 
 ```js
@@ -50,3 +52,8 @@ Server → Client: `session_created`, `status`, `token`, `tool_start`, `tool_res
 ```
 main → pocket (mirror) → pocket/{timestamp}-{slug} (agent branch) → PR to pocket
 ```
+
+## Automatic Flow
+
+1. **Branch Creation**: When a branch is created via `create_branch`, it is automatically pushed to origin
+2. **Post-Chat**: After chat completes, any uncommitted changes are automatically committed, pushed, and a PR is created to the `pocket` branch

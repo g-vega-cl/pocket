@@ -16,6 +16,7 @@ function PocketApp() {
     isLoading,
     currentToolCall,
     error,
+    prUrl,
     createSession,
     resumeSession,
     clone,
@@ -192,6 +193,20 @@ function PocketApp() {
           </span>
         </div>
 
+        {prUrl && (
+          <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+            <p className="text-sm font-medium text-green-800 mb-1">Pull Request Created!</p>
+            <a
+              href={prUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm text-blue-600 hover:text-blue-800 underline"
+            >
+              {prUrl}
+            </a>
+          </div>
+        )}
+
         <div className="flex gap-2">
           {!session?.localPath && (
             <button
@@ -290,7 +305,7 @@ function PocketApp() {
           <div ref={messagesEndRef} />
         </div>
 
-        {session?.status === 'ready' && (
+        {(session?.status === 'ready' || session?.status === 'done') && (
           <form onSubmit={handleSendMessage} className="border-t dark:border-gray-700 p-4">
             <div className="flex items-center gap-2 mb-2">
               <input

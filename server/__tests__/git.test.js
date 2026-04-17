@@ -1,17 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+const mockExecSync = vi.fn();
+const mockExistsSync = vi.fn();
+
 vi.mock('child_process', () => ({
-  execSync: vi.fn(),
+  execSync: mockExecSync,
 }));
 
 vi.mock('fs', () => ({
-  existsSync: vi.fn().mockReturnValue(true),
+  existsSync: mockExistsSync,
   mkdirSync: vi.fn(),
 }));
 
 describe('Git Tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockExistsSync.mockReturnValue(true);
   });
 
   describe('parseRepoInfo', () => {
@@ -67,6 +71,41 @@ describe('Git Tools', () => {
       const { slugify } = await import('../tools/git.js');
 
       expect(slugify('---hello---')).toBe('hello');
+    });
+  });
+
+  describe('gitPush', () => {
+    it('should call execSync with correct git push command', async () => {
+      const { gitPush } = await import('../tools/git.js');
+
+      await gitPush('/tmp/pocket/test', 'pocket/123-test-branch');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git -C /tmp/pocket/test push -u origin pocket/123-test-branch',
+        { stdio: 'inherit' }
+      );
+    });
+  });
+
+  describe('gitStatus', () => {
+    it('should return dirty: true when there are changes', async () => {
+      const { gitStatus } = await import('../tools/git.js');
+
+      mockExecSync.mockReturnValue(' M file1.js\n?? file2.js\n');
+
+      const result = await gitStatus('/tmp/pocket/test');
+
+      expect(result).toEqual({ dirty: true });
+    });
+
+    it('should return dirty: false when there are no changes', async () => {
+      const { gitStatus } = await import('../tools/git.js');
+
+      mockExecSync.mockReturnValue('');
+
+      const result = await gitStatus('/tmp/pocket/test');
+
+      expect(result).toEqual({ dirty: false });
     });
   });
 });

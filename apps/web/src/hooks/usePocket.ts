@@ -50,7 +50,7 @@ type ServerMessage =
   | { type: 'token'; content: string }
   | { type: 'tool_start'; tool: string; args: Record<string, unknown> }
   | { type: 'tool_result'; tool: string; result: unknown }
-  | { type: 'done' }
+  | { type: 'done'; prUrl?: string | null }
   | { type: 'error'; error: string }
   | { type: 'aborted' };
 
@@ -192,6 +192,7 @@ export function usePocket(wsUrl: string) {
           ...prev,
           isLoading: false,
           currentToolCall: null,
+          prUrl: msg.prUrl ?? prev.prUrl,
           session: prev.session ? { ...prev.session, status: 'done' } : null,
         }));
         break;

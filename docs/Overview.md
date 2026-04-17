@@ -14,8 +14,9 @@ Self-hosted autonomous coding agent. Chat with an AI to work on GitHub repos.
 ## How it works
 
 1. Paste repo URL → Start Session
-2. Clone Repo → Create Branch
-3. Chat with agent → PR created to `pocket` branch
+2. Clone Repo → Create Branch (branch is pushed to origin automatically)
+3. Chat with agent → Changes committed, pushed, and PR created to `pocket` branch
+4. Continue chatting or start a new session
 
 ## Architecture
 
