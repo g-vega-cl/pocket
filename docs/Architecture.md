@@ -17,6 +17,23 @@ Frontend (React) → WebSocket Server → Tools (Git, Files, GitHub)
 `server/sessions.js` - In-memory session store
 `server/llm.js` - OpenRouter client
 
+### LLM Client (llm.js)
+
+The `streamChat` function handles OpenRouter's streaming API with tool calling:
+
+- Supports both string and array formats for `delta.content` (various LLM providers return different formats)
+- Accumulates tool arguments across streaming chunks
+- Calls `onChunk` for text tokens and `onToolCall` for tool use (start/complete)
+
+```typescript
+streamChat(
+  messages: {role: string, content: string}[],
+  onChunk: (text: string) => void,
+  onToolCall: (toolCall: {name, arguments, status}) => void,
+  model?: string
+)
+```
+
 ## Tools
 
 | Tool | File | Description |
