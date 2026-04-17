@@ -1,5 +1,20 @@
 # Architecture
 
+## Networking & Deployment
+
+### Local Development
+- **Frontend (Vite/TanStack Start):** Runs on port `3000`.
+- **Backend (Express/WS):** Runs on port `5173`.
+- **Proxy:** Vite proxies `/ws` requests to `localhost:5173`.
+
+### Cloudflare Tunnel Setup
+To expose the application securely:
+1. **Tunnel Configuration:** Map your public domain (e.g., `bolt.clvg.uk`) to `http://localhost:3000`.
+2. **Vite Security:** 
+   - Add the domain to `server.allowedHosts` in `vite.config.ts`.
+   - Set `server.hmr.host` to your domain to allow Hot Module Replacement.
+3. **Secure WebSockets:** The application automatically detects the protocol (`ws:` vs `wss:`) based on `window.location.protocol` to ensure compatibility with Cloudflare's HTTPS.
+
 ## Layers
 
 ```

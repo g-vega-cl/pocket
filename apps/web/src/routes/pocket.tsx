@@ -10,7 +10,8 @@ function PocketApp() {
   const [wsUrl, setWsUrl] = useState<string>('');
 
   useEffect(() => {
-    setWsUrl(`ws://${window.location.host}/ws`);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    setWsUrl(`${protocol}//${window.location.host}/ws`);
   }, []);
 
   const {

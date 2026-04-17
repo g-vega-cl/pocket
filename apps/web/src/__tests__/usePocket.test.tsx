@@ -14,7 +14,7 @@ describe('usePocket Hook', () => {
   });
 
   it('should expose commit and createPR methods', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:3000'));
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
     expect(result.current.commit).toBeDefined();
     expect(result.current.commit).toBeInstanceOf(Function);
     expect(result.current.createPR).toBeDefined();

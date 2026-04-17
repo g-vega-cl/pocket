@@ -3,12 +3,17 @@ import express from 'express';
 import { createServer } from 'http';
 import { WebSocketServer } from 'ws';
 import cors from 'cors';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { createSession, getSession, updateSession, addToHistory } from './sessions.js';
 import { gitClone, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
 import { readFile, writeFile } from './tools/file.js';
 import { runCommand } from './tools/command.js';
 import { createPullRequest } from './tools/github.js';
 import { buildSystemMessage, streamChat } from './llm.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = createServer(app);

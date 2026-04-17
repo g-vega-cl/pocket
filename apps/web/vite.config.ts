@@ -10,6 +10,10 @@ import tailwindcss from '@tailwindcss/vite'
 
 const config = defineConfig({
   server: {
+    allowedHosts: ['bolt.clvg.uk'],
+    hmr: {
+      host: 'bolt.clvg.uk',
+    },
     proxy: {
       '/ws': {
         target: 'http://localhost:5173',

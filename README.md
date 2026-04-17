@@ -15,11 +15,18 @@ cp .env.example .env
 ```bash
 pnpm dev        # Both server + frontend
 # Or:
-pnpm server     # Backend on :8080
+pnpm server     # Backend on :5173
 pnpm web:dev    # Frontend on :3000
 ```
 
 Access: http://localhost:3000/pocket
+
+### Deployment with Cloudflare Tunnel
+
+If using a Cloudflare Tunnel (e.g., `bolt.clvg.uk`):
+1. Point your tunnel's public hostname to `http://localhost:3000`.
+2. The frontend Vite server is configured to proxy `/ws` to port `5173` for the backend.
+3. Ensure `apps/web/vite.config.ts` includes your domain in `allowedHosts` and `hmr.host`.
 
 ## Use
 
