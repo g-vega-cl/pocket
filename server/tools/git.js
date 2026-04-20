@@ -42,6 +42,23 @@ async function gitClone(repoUrl) {
   return { localPath, owner, repo };
 }
 
+async function gitInit() {
+  ensureTempDir();
+  const destName = `local-${randomUUID().substring(0, 8)}`;
+  const localPath = join(TEMP_DIR, destName);
+
+  if (existsSync(localPath)) {
+    execSync(`rm -rf ${localPath}`);
+  }
+
+  mkdirSync(localPath, { recursive: true });
+  execSync(`git -C ${localPath} init`, { stdio: 'inherit' });
+  execSync(`git -C ${localPath} config user.email "pocket-agent@local"`, { stdio: 'inherit' });
+  execSync(`git -C ${localPath} config user.name "Pocket Agent"`, { stdio: 'inherit' });
+
+  return { localPath };
+}
+
 async function gitCreateBranch(localPath, taskDescription) {
   const slug = slugify(taskDescription);
   const timestamp = Math.floor(Date.now() / 1000);
@@ -77,6 +94,7 @@ async function gitStatus(localPath) {
 
 export {
   gitClone,
+  gitInit,
   gitCreateBranch,
   gitCommit,
   gitPush,
