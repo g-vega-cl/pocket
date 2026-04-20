@@ -24,12 +24,15 @@ function PocketApp() {
     prUrl,
     notification,
     createSession,
+    createLocalSession,
     resumeSession,
+    respondToPermission,
     clone,
     createBranch,
     sendMessage,
     commit,
     createPR,
+    pendingPermission,
   } = usePocket(wsUrl);
 
   const [repoUrl, setRepoUrl] = useState('');
@@ -47,6 +50,11 @@ function PocketApp() {
   const handleStart = () => {
     if (!repoUrl || !task) return;
     createSession(repoUrl, task);
+  };
+
+  const handleStartLocal = () => {
+    if (!task) return;
+    createLocalSession(task);
   };
 
   const handleResume = () => {
@@ -126,13 +134,22 @@ function PocketApp() {
               className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             />
           </div>
-          <button
-            onClick={handleStart}
-            disabled={!repoUrl || !task || isLoading}
-            className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-          >
-            Start Session
-          </button>
+          <div className="flex gap-4">
+            <button
+              onClick={handleStart}
+              disabled={!repoUrl || !task || isLoading}
+              className="flex-1 px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              Start Session
+            </button>
+            <button
+              onClick={handleStartLocal}
+              disabled={!task || isLoading}
+              className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+            >
+              Start Local Session
+            </button>
+          </div>
         </div>
       </div>
 
@@ -221,6 +238,31 @@ function PocketApp() {
           </div>
         )}
 
+        {pendingPermission && (
+          <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg shadow-sm">
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2">Permission Required</h3>
+            <p className="text-sm text-yellow-700 mb-4">{pendingPermission.reason}</p>
+            <div className="bg-white/50 p-2 rounded mb-4 font-mono text-xs">
+              <p>Tool: {pendingPermission.tool}</p>
+              <pre className="mt-1 overflow-x-auto">{JSON.stringify(pendingPermission.args, null, 2)}</pre>
+            </div>
+            <div className="flex gap-3">
+              <button
+                onClick={() => respondToPermission(pendingPermission.requestId, true)}
+                className="px-4 py-2 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition"
+              >
+                Approve
+              </button>
+              <button
+                onClick={() => respondToPermission(pendingPermission.requestId, false)}
+                className="px-4 py-2 bg-red-600 text-white rounded font-medium hover:bg-red-700 transition"
+              >
+                Deny
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex gap-2">
           {!session?.localPath && (
             <button
@@ -256,12 +298,14 @@ function PocketApp() {
             >
               Commit
             </button>
-            <button
-              onClick={() => createPR(session.id)}
-              className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700"
-            >
-              Create PR
-            </button>
+            {!session.isLocal && (
+              <button
+                onClick={() => createPR(session.id)}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700"
+              >
+                Create PR
+              </button>
+            )}
             {prUrl && (
               <a
                 href={prUrl}

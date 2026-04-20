@@ -19,6 +19,7 @@ export interface Session {
   id: string;
   repoUrl: string;
   task: string;
+  isLocal?: boolean;
   localPath: string | null;
   branchName: string | null;
   history: Message[];
@@ -40,6 +41,12 @@ interface PocketState {
   prUrl: string | null;
   error: string | null;
   notification: string | null;
+  pendingPermission: {
+    requestId: string;
+    tool: string;
+    args: Record<string, unknown>;
+    reason: string;
+  } | null;
 }
 
 type ServerMessage =
@@ -54,6 +61,7 @@ type ServerMessage =
   | { type: 'done'; prUrl?: string | null }
   | { type: 'debug'; data: unknown }
   | { type: 'error'; error: string }
+  | { type: 'permission_request'; requestId: string; tool: string; args: Record<string, unknown>; reason: string }
   | { type: 'aborted' };
 
 export function usePocket(wsUrl: string) {
@@ -66,6 +74,7 @@ export function usePocket(wsUrl: string) {
     prUrl: null,
     error: null,
     notification: null,
+    pendingPermission: null,
   });
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -218,6 +227,18 @@ export function usePocket(wsUrl: string) {
           error: msg.error,
         }));
         break;
+
+      case 'permission_request':
+        setState((prev) => ({
+          ...prev,
+          pendingPermission: {
+            requestId: msg.requestId,
+            tool: msg.tool,
+            args: msg.args,
+            reason: msg.reason,
+          },
+        }));
+        break;
     }
   }, []);
 
@@ -236,6 +257,36 @@ export function usePocket(wsUrl: string) {
           id: '',
           repoUrl,
           task,
+          localPath: null,
+          branchName: null,
+          history: [],
+          status: 'created',
+        },
+        messages: [],
+        error: null,
+      }));
+    },
+    [send]
+  );
+
+  const respondToPermission = useCallback(
+    (requestId: string, granted: boolean) => {
+      send({ type: 'permission_response', payload: { requestId, granted } });
+      setState((prev) => ({ ...prev, pendingPermission: null }));
+    },
+    [send]
+  );
+
+  const createLocalSession = useCallback(
+    (task: string) => {
+      send({ type: 'create_local_session', payload: { task } });
+      setState((prev) => ({
+        ...prev,
+        session: {
+          id: '',
+          repoUrl: 'local',
+          task,
+          isLocal: true,
           localPath: null,
           branchName: null,
           history: [],
@@ -307,7 +358,9 @@ export function usePocket(wsUrl: string) {
   return {
     ...state,
     createSession,
+    createLocalSession,
     resumeSession,
+    respondToPermission,
     clone,
     createBranch,
     sendMessage,

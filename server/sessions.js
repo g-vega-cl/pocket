@@ -4,12 +4,13 @@ function generateId() {
   return 'sess_' + Math.random().toString(36).substring(2, 15);
 }
 
-function createSession({ repoUrl, task }) {
+function createSession({ repoUrl, task, isLocal = false }) {
   const id = generateId();
   const session = {
     id,
     repoUrl,
     task,
+    isLocal,
     localPath: null,
     branchName: null,
     history: [],

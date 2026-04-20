@@ -6,7 +6,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createSession, getSession, updateSession, addToHistory } from './sessions.js';
-import { gitClone, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
+import { gitClone, gitInit, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
 import { readFile, writeFile } from './tools/file.js';
 import { runCommand } from './tools/command.js';
 import { createPullRequest } from './tools/github.js';
@@ -25,6 +25,7 @@ app.use(express.json());
 const PORT = process.env.PORT || 5173;
 
 const clients = new Map();
+const pendingPermissions = new Map();
 
 wss.on('connection', (ws) => {
   console.log('Client connected');
@@ -49,6 +50,19 @@ wss.on('connection', (ws) => {
     for (const [sessionId, clientWs] of clients) {
       if (clientWs === ws) {
         clients.delete(sessionId);
+
+          // Cleanup local session temp folder
+          const session = getSession(sessionId);
+          if (session && session.isLocal && session.localPath) {
+            import('fs').then(fs => {
+              if (fs.existsSync(session.localPath)) {
+                console.log(`Cleaning up local session: ${session.localPath}`);
+                import('child_process').then(cp => {
+                  cp.exec(`rm -rf ${session.localPath}`);
+                });
+              }
+            });
+          }
         break;
       }
     }
@@ -78,6 +92,24 @@ async function handleMessage(ws, message) {
       const session = createSession({ repoUrl, task });
       clients.set(session.id, ws);
       send(ws, { type: 'session_created', sessionId: session.id });
+      break;
+    }
+
+    case 'create_local_session': {
+      const { task } = payload;
+      const session = createSession({ repoUrl: 'local', task, isLocal: true });
+      clients.set(session.id, ws);
+      send(ws, { type: 'session_created', sessionId: session.id });
+
+      // Automatically initialize local session
+      try {
+        const { localPath } = await gitInit();
+        updateSession(session.id, { localPath, status: 'ready', branchName: 'main' });
+        send(ws, { type: 'status', status: 'ready', message: 'Local session ready', localPath, branchName: 'main' });
+      } catch (error) {
+        updateSession(session.id, { status: 'error' });
+        send(ws, { type: 'error', error: `Local initialization failed: ${error.message}` });
+      }
       break;
     }
 
@@ -193,7 +225,14 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
           }
         },
         async (toolName, args) => {
-          return await executeTool(session.localPath, toolName, args);
+          const requestPermission = async (reason) => {
+            const requestId = Math.random().toString(36).substring(7);
+            send(ws, { type: 'permission_request', requestId, tool: toolName, args, reason });
+            return new Promise((resolve) => {
+              pendingPermissions.set(requestId, resolve);
+            });
+          };
+          return await executeTool(session.localPath, toolName, args, requestPermission);
         },
         (raw) => send(ws, { type: 'debug', data: raw }),
         model
@@ -207,17 +246,22 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
         if (dirty) {
           send(ws, { type: 'status', status: 'working', message: 'Committing changes...' });
           await gitCommit(session.localPath, `Pocket: ${session.task}`);
-          send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
-          await gitPush(session.localPath, session.branchName);
-          send(ws, { type: 'status', status: 'working', message: 'Creating pull request...' });
-          const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`);
-          prUrl = prResult.prUrl;
-          if (prUrl) {
-            updateSession(sessionId, { prUrl });
+
+          if (!session.isLocal) {
+            send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
+            await gitPush(session.localPath, session.branchName);
+            send(ws, { type: 'status', status: 'working', message: 'Creating pull request...' });
+            const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`);
+            prUrl = prResult.prUrl;
+            if (prUrl) {
+              updateSession(sessionId, { prUrl });
+            }
+          } else {
+            send(ws, { type: 'status', status: 'working', message: 'Changes committed locally.' });
           }
         }
       } catch (error) {
-        console.error('Auto-push/PR failed:', error.message);
+        console.error('Auto-push/PR/Commit failed:', error.message);
       }
 
       send(ws, { type: 'status', status: 'ready', message: 'Ready for more!', prUrl });
@@ -245,9 +289,13 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
 
         send(ws, { type: 'status', status: 'working', message: 'Committing changes...' });
         await gitCommit(session.localPath, `Pocket: ${session.task}`);
-        send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
-        await gitPush(session.localPath, session.branchName);
-        send(ws, { type: 'status', status: 'ready', message: 'Committed and pushed!' });
+        if (!session.isLocal) {
+          send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
+          await gitPush(session.localPath, session.branchName);
+          send(ws, { type: 'status', status: 'ready', message: 'Committed and pushed!' });
+        } else {
+          send(ws, { type: 'status', status: 'ready', message: 'Committed locally!' });
+        }
       } catch (error) {
         send(ws, { type: 'error', error: error.message });
       }
@@ -285,19 +333,51 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
       send(ws, { type: 'aborted' });
       break;
     }
+
+    case 'permission_response': {
+      const { requestId, granted } = payload;
+      const resolver = pendingPermissions.get(requestId);
+      if (resolver) {
+        resolver(granted);
+        pendingPermissions.delete(requestId);
+      }
+      break;
+    }
   }
 }
 
-async function executeTool(localPath, toolName, args) {
+async function executeTool(localPath, toolName, args, requestPermission) {
+  const isPathOutside = (targetPath) => {
+    if (!targetPath) return false;
+    const absoluteTarget = path.isAbsolute(targetPath) ? targetPath : path.join(localPath, targetPath);
+    const relative = path.relative(localPath, absoluteTarget);
+    return relative.startsWith('..') || path.isAbsolute(relative);
+  };
+
   switch (toolName) {
     case 'read_file':
       return readFile(localPath, args.path);
 
-    case 'write_file':
+    case 'write_file': {
+      if (isPathOutside(args.path)) {
+        const granted = await requestPermission(`Action attempts to write file outside of temporary folder: ${args.path}`);
+        if (!granted) return { error: 'Permission denied' };
+      }
       return writeFile(localPath, args.path, args.content);
+    }
 
-    case 'run_command':
-      return runCommand(localPath, args.command);
+    case 'run_command': {
+      const command = args.command || '';
+      const destructiveKeywords = ['rm ', 'mv ', 'chmod ', 'chown '];
+      const isDestructive = destructiveKeywords.some(kw => command.includes(kw));
+      const targetsOutside = command.includes('..') || command.includes(' /');
+
+      if (isDestructive || targetsOutside) {
+        const granted = await requestPermission(`Action attempts to run a potentially destructive command or access outside of temporary folder: ${command}`);
+        if (!granted) return { error: 'Permission denied' };
+      }
+      return runCommand(localPath, command);
+    }
 
     case 'git_commit':
       return gitCommit(localPath, args.message);
