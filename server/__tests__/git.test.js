@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 const mockExecSync = vi.fn();
 const mockExistsSync = vi.fn();
+const mockReaddirSync = vi.fn();
+const mockStatSync = vi.fn();
+const mockRmSync = vi.fn();
+
+vi.mock('os', () => ({
+  tmpdir: () => '/mock-tmpdir',
+}));
 
 vi.mock('child_process', () => ({
   execSync: mockExecSync,
@@ -10,6 +19,9 @@ vi.mock('child_process', () => ({
 vi.mock('fs', () => ({
   existsSync: mockExistsSync,
   mkdirSync: vi.fn(),
+  readdirSync: mockReaddirSync,
+  statSync: mockStatSync,
+  rmSync: mockRmSync,
 }));
 
 describe('Git Tools', () => {
@@ -106,6 +118,95 @@ describe('Git Tools', () => {
       const result = await gitStatus('/tmp/pocket/test');
 
       expect(result).toEqual({ dirty: false });
+    });
+  });
+
+  describe('getTempDir', () => {
+    it('should return a path containing pocket', async () => {
+      const { getTempDir } = await import('../tools/git.js');
+
+      const result = getTempDir();
+
+      expect(result).toContain('pocket');
+    });
+
+    it('should use system tmpdir', async () => {
+      const { getTempDir } = await import('../tools/git.js');
+
+      const result = getTempDir();
+
+      expect(result).toContain(tmpdir());
+    });
+
+    it('should join tmpdir with pocket', async () => {
+      const { getTempDir } = await import('../tools/git.js');
+
+      const result = getTempDir();
+      const expected = join(tmpdir(), 'pocket');
+
+      expect(result).toBe(expected);
+    });
+  });
+
+  describe('cleanupTempDirs', () => {
+    beforeEach(() => {
+      vi.clearAllMocks();
+      mockExistsSync.mockReturnValue(true);
+    });
+
+    it('should not throw if temp dir does not exist', async () => {
+      mockExistsSync.mockReturnValue(false);
+      const { cleanupTempDirs } = await import('../tools/git.js');
+
+      await expect(cleanupTempDirs()).resolves.not.toThrow();
+    });
+
+    it('should remove directories older than 7 days by default', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReaddirSync.mockReturnValue([{ name: 'old-repo', isDirectory: () => true }]);
+      mockStatSync.mockReturnValue({ isDirectory: () => true, mtimeMs: Date.now() - 8 * 24 * 60 * 60 * 1000 });
+
+      const { cleanupTempDirs } = await import('../tools/git.js');
+
+      await cleanupTempDirs();
+
+      expect(mockRmSync).toHaveBeenCalled();
+    });
+
+    it('should not remove directories newer than 7 days', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReaddirSync.mockReturnValue([{ name: 'new-repo', isDirectory: () => true }]);
+      mockStatSync.mockReturnValue({ isDirectory: () => true, mtimeMs: Date.now() });
+
+      const { cleanupTempDirs } = await import('../tools/git.js');
+
+      await cleanupTempDirs();
+
+      expect(mockRmSync).not.toHaveBeenCalled();
+    });
+
+    it('should use custom maxAgeMs when provided', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReaddirSync.mockReturnValue([{ name: 'old-repo', isDirectory: () => true }]);
+      mockStatSync.mockReturnValue({ isDirectory: () => true, mtimeMs: Date.now() - 2 * 24 * 60 * 60 * 1000 });
+
+      const { cleanupTempDirs } = await import('../tools/git.js');
+
+      await cleanupTempDirs(24 * 60 * 60 * 1000);
+
+      expect(mockRmSync).toHaveBeenCalled();
+    });
+
+    it('should skip non-directory entries', async () => {
+      mockExistsSync.mockReturnValue(true);
+      mockReaddirSync.mockReturnValue([{ name: 'file.txt', isDirectory: () => false }]);
+      mockStatSync.mockReturnValue({ isDirectory: () => false });
+
+      const { cleanupTempDirs } = await import('../tools/git.js');
+
+      await cleanupTempDirs();
+
+      expect(mockRmSync).not.toHaveBeenCalled();
     });
   });
 });

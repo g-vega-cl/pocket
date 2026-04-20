@@ -1,13 +1,36 @@
 import { execSync, exec } from 'child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, rmSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
+import { tmpdir } from 'os';
 
-const TEMP_DIR = '/tmp/pocket';
+function getTempDir() {
+  return join(tmpdir(), 'pocket');
+}
+
+async function cleanupTempDirs(maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
+  const tempDir = getTempDir();
+  if (!existsSync(tempDir)) return;
+
+  const entries = readdirSync(tempDir, { withFileTypes: true });
+  const now = Date.now();
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const fullPath = join(tempDir, entry.name);
+    const stats = statSync(fullPath);
+    if (now - stats.mtimeMs > maxAgeMs) {
+      rmSync(fullPath, { recursive: true, force: true });
+    }
+  }
+}
+
+cleanupTempDirs().catch(() => {});
 
 function ensureTempDir() {
-  if (!existsSync(TEMP_DIR)) {
-    mkdirSync(TEMP_DIR, { recursive: true });
+  const tempDir = getTempDir();
+  if (!existsSync(tempDir)) {
+    mkdirSync(tempDir, { recursive: true });
   }
 }
 
@@ -31,7 +54,7 @@ async function gitClone(repoUrl) {
   ensureTempDir();
   const { owner, repo } = parseRepoInfo(repoUrl);
   const destName = `${owner}-${repo}-${randomUUID().substring(0, 8)}`;
-  const localPath = join(TEMP_DIR, destName);
+  const localPath = join(getTempDir(), destName);
 
   if (existsSync(localPath)) {
     execSync(`rm -rf ${localPath}`);
@@ -45,7 +68,7 @@ async function gitClone(repoUrl) {
 async function gitInit() {
   ensureTempDir();
   const destName = `local-${randomUUID().substring(0, 8)}`;
-  const localPath = join(TEMP_DIR, destName);
+  const localPath = join(getTempDir(), destName);
 
   if (existsSync(localPath)) {
     execSync(`rm -rf ${localPath}`);
@@ -101,4 +124,6 @@ export {
   gitStatus,
   parseRepoInfo,
   slugify,
+  getTempDir,
+  cleanupTempDirs,
 };

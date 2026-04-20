@@ -78,6 +78,13 @@ buildSystemMessage(
 | git_push | tools/git.js | Push to remote |
 | github_create_pr | tools/github.js | Create PR |
 
+### Temp Directory
+
+Repositories are cloned to `{os.tmpdir()}/pocket` (e.g., `/tmp/pocket` on Linux, `/var/folders/.../T/pocket` on macOS).
+
+- **Cross-platform**: Uses `os.tmpdir()` automatically
+- **Automatic cleanup**: Directories older than 7 days are removed on server startup
+
 ## WebSocket Protocol
 
 Client → Server: `create_session`, `resume_session`, `clone`, `create_branch`, `chat`, `commit`, `create_pr`
