@@ -20,4 +20,11 @@ describe('usePocket Hook', () => {
     expect(result.current.createPR).toBeDefined();
     expect(result.current.createPR).toBeInstanceOf(Function);
   });
+
+  it('should expose listSessions method and sessions state', async () => {
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+    expect(result.current.listSessions).toBeDefined();
+    expect(result.current.listSessions).toBeInstanceOf(Function);
+    expect(result.current.sessions).toBeInstanceOf(Array);
+  });
 });

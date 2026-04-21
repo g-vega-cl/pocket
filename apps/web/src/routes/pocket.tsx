@@ -54,10 +54,11 @@ function PocketApp() {
     const url = new URL(window.location.href);
     if (session?.id) {
       url.searchParams.set('sessionId', session.id);
-    } else {
-      url.searchParams.delete('sessionId');
+      window.history.replaceState({}, '', url.toString());
+    } else if (session === null && !new URLSearchParams(window.location.search).get('sessionId')) {
+      // Only clear if we explicitly have no session and no sessionId in URL
+      // This avoids clearing the URL before the resumeSession effect has a chance to run
     }
-    window.history.replaceState({}, '', url.toString());
   }, [session?.id]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);

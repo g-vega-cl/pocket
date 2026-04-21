@@ -138,6 +138,7 @@ export function usePocket(wsUrl: string) {
           ...prev,
           session: msg.session,
           messages: msg.session.history,
+          isLoading: false,
         }));
         break;
 
@@ -327,6 +328,7 @@ export function usePocket(wsUrl: string) {
 
   const resumeSession = useCallback(
     (sessionId: string) => {
+      setState((prev) => ({ ...prev, isLoading: true }));
       send({ type: 'resume_session', sessionId });
     },
     [send]
