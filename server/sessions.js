@@ -33,6 +33,10 @@ function updateSession(id, updates) {
   return session;
 }
 
+function getAllSessions() {
+  return Array.from(sessions.values()).sort((a, b) => b.createdAt - a.createdAt);
+}
+
 function addToHistory(id, message) {
   const session = sessions.get(id);
   if (!session) return null;
@@ -55,6 +59,7 @@ setInterval(cleanupOldSessions, 60 * 60 * 1000);
 export {
   createSession,
   getSession,
+  getAllSessions,
   updateSession,
   addToHistory,
 };

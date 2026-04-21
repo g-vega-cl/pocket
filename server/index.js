@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createSession, getSession, updateSession, addToHistory } from './sessions.js';
+import { createSession, getSession, getAllSessions, updateSession, addToHistory } from './sessions.js';
 import { gitClone, gitInit, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
 import { readFile, writeFile } from './tools/file.js';
 import { runCommand } from './tools/command.js';
@@ -83,15 +83,43 @@ wss.on('close', () => {
   clearInterval(pingInterval);
 });
 
+function broadcastSessionList() {
+  const sessions = getAllSessions().map(s => ({
+    id: s.id,
+    repoUrl: s.repoUrl,
+    task: s.task,
+    createdAt: s.createdAt,
+    status: s.status,
+  }));
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) {
+      send(client, { type: 'sessions_list', sessions });
+    }
+  });
+}
+
 async function handleMessage(ws, message) {
   const { type, sessionId, payload } = message;
 
   switch (type) {
+    case 'list_sessions': {
+      const sessions = getAllSessions().map(s => ({
+        id: s.id,
+        repoUrl: s.repoUrl,
+        task: s.task,
+        createdAt: s.createdAt,
+        status: s.status,
+      }));
+      send(ws, { type: 'sessions_list', sessions });
+      break;
+    }
+
     case 'create_session': {
       const { repoUrl, task } = payload;
       const session = createSession({ repoUrl, task });
       clients.set(session.id, ws);
       send(ws, { type: 'session_created', sessionId: session.id });
+      broadcastSessionList();
       break;
     }
 
@@ -100,6 +128,7 @@ async function handleMessage(ws, message) {
       const session = createSession({ repoUrl: 'local', task, isLocal: true });
       clients.set(session.id, ws);
       send(ws, { type: 'session_created', sessionId: session.id });
+      broadcastSessionList();
 
       // Automatically initialize local session
       try {
