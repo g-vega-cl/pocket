@@ -32,9 +32,18 @@ export interface ToolCall {
   result?: unknown;
 }
 
+interface SessionListItem {
+  id: string;
+  repoUrl: string;
+  task: string;
+  createdAt: number;
+  status: SessionStatus;
+}
+
 interface PocketState {
   connected: boolean;
   session: Session | null;
+  sessions: SessionListItem[];
   messages: Message[];
   isLoading: boolean;
   currentToolCall: ToolCall | null;
@@ -53,6 +62,7 @@ type ServerMessage =
   | { type: 'session_created'; sessionId: string }
   | { type: 'session_resumed'; session: Session }
   | { type: 'session_data'; session: Session }
+  | { type: 'sessions_list'; sessions: SessionListItem[] }
   | { type: 'status'; status: SessionStatus; message?: string; localPath?: string; branchName?: string }
   | { type: 'user_message'; content: string }
   | { type: 'token'; content: string }
@@ -68,6 +78,7 @@ export function usePocket(wsUrl: string) {
   const [state, setState] = useState<PocketState>({
     connected: false,
     session: null,
+    sessions: [],
     messages: [],
     isLoading: false,
     currentToolCall: null,
@@ -88,6 +99,7 @@ export function usePocket(wsUrl: string) {
 
     ws.onopen = () => {
       setState((prev) => ({ ...prev, connected: true, error: null }));
+      ws.send(JSON.stringify({ type: 'list_sessions' }));
     };
 
     ws.onclose = () => {
@@ -117,6 +129,7 @@ export function usePocket(wsUrl: string) {
         setState((prev) => ({
           ...prev,
           session: { ...prev.session!, id: msg.sessionId } as Session,
+          isLoading: false,
         }));
         break;
 
@@ -125,6 +138,7 @@ export function usePocket(wsUrl: string) {
           ...prev,
           session: msg.session,
           messages: msg.session.history,
+          isLoading: false,
         }));
         break;
 
@@ -133,6 +147,13 @@ export function usePocket(wsUrl: string) {
           ...prev,
           session: msg.session,
           messages: msg.session.history,
+        }));
+        break;
+
+      case 'sessions_list':
+        setState((prev) => ({
+          ...prev,
+          sessions: msg.sessions,
         }));
         break;
 
@@ -250,9 +271,9 @@ export function usePocket(wsUrl: string) {
 
   const createSession = useCallback(
     (repoUrl: string, task: string) => {
-      send({ type: 'create_session', payload: { repoUrl, task } });
       setState((prev) => ({
         ...prev,
+        isLoading: true,
         session: {
           id: '',
           repoUrl,
@@ -265,9 +286,14 @@ export function usePocket(wsUrl: string) {
         messages: [],
         error: null,
       }));
+      send({ type: 'create_session', payload: { repoUrl, task } });
     },
     [send]
   );
+
+  const listSessions = useCallback(() => {
+    send({ type: 'list_sessions' });
+  }, [send]);
 
   const respondToPermission = useCallback(
     (requestId: string, granted: boolean) => {
@@ -279,9 +305,9 @@ export function usePocket(wsUrl: string) {
 
   const createLocalSession = useCallback(
     (task: string) => {
-      send({ type: 'create_local_session', payload: { task } });
       setState((prev) => ({
         ...prev,
+        isLoading: true,
         session: {
           id: '',
           repoUrl: 'local',
@@ -295,12 +321,14 @@ export function usePocket(wsUrl: string) {
         messages: [],
         error: null,
       }));
+      send({ type: 'create_local_session', payload: { task } });
     },
     [send]
   );
 
   const resumeSession = useCallback(
     (sessionId: string) => {
+      setState((prev) => ({ ...prev, isLoading: true }));
       send({ type: 'resume_session', sessionId });
     },
     [send]
@@ -360,6 +388,7 @@ export function usePocket(wsUrl: string) {
     createSession,
     createLocalSession,
     resumeSession,
+    listSessions,
     respondToPermission,
     clone,
     createBranch,

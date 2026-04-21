@@ -87,8 +87,8 @@ Repositories are cloned to `{os.tmpdir()}/pocket` (e.g., `/tmp/pocket` on Linux,
 
 ## WebSocket Protocol
 
-Client → Server: `create_session`, `resume_session`, `clone`, `create_branch`, `chat`, `commit`, `create_pr`
-Server → Client: `session_created`, `status`, `token`, `tool_start`, `tool_result`, `debug`, `error`
+Client → Server: `create_session`, `resume_session`, `list_sessions`, `clone`, `create_branch`, `chat`, `commit`, `create_pr`
+Server → Client: `session_created`, `session_resumed`, `sessions_list`, `status`, `token`, `tool_start`, `tool_result`, `debug`, `error`
 
 **Note**: `status` messages include a `message` field for feedback (e.g., "Committed and pushed!", "PR created!"). `debug` messages contain raw LLM response data for debugging.
 
@@ -98,9 +98,20 @@ Server → Client: `session_created`, `status`, `token`, `tool_start`, `tool_res
 {
   id, repoUrl, task, localPath, branchName,
   history: [{role, content}],
-  status // created|cloning|cloned|creating_branch|ready|working|done|error
+  status, // created|cloning|cloned|creating_branch|ready|working|done|error
+  createdAt,
+  lastActivity
 }
 ```
+
+## URL Strategy
+
+The frontend persists the current session ID in the URL using the `sessionId` query parameter:
+- `http://localhost:3000/pocket?sessionId=sess_abc123`
+
+This allows:
+1. **Persistence**: Refreshing the page doesn't lose the active session.
+2. **Deep Linking**: Sharing a session URL (in a local network) allows another tab to resume it.
 
 ## Branch Strategy
 

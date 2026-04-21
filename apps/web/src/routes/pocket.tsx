@@ -17,6 +17,7 @@ function PocketApp() {
   const {
     connected,
     session,
+    sessions,
     messages,
     isLoading,
     currentToolCall,
@@ -40,6 +41,25 @@ function PocketApp() {
   const [inputValue, setInputValue] = useState('');
   const [sessionIdInput, setSessionIdInput] = useState('');
   const [selectedModel, setSelectedModel] = useState('openrouter/elephant-alpha');
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sid = params.get('sessionId');
+    if (sid && connected && !session) {
+      resumeSession(sid);
+    }
+  }, [connected, resumeSession, session]);
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (session?.id) {
+      url.searchParams.set('sessionId', session.id);
+      window.history.replaceState({}, '', url.toString());
+    } else if (session === null && !new URLSearchParams(window.location.search).get('sessionId')) {
+      // Only clear if we explicitly have no session and no sessionId in URL
+      // This avoids clearing the URL before the resumeSession effect has a chance to run
+    }
+  }, [session?.id]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -172,6 +192,32 @@ function PocketApp() {
           </button>
         </div>
       </div>
+
+      {sessions.length > 0 && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm">
+          <h2 className="text-xl font-semibold mb-4">Session History</h2>
+          <div className="divide-y dark:divide-gray-700">
+            {sessions.map((s) => (
+              <button
+                key={s.id}
+                onClick={() => resumeSession(s.id)}
+                className="w-full text-left py-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition px-2 -mx-2 rounded-lg group"
+              >
+                <div className="flex justify-between items-start mb-1">
+                  <span className="font-medium text-blue-600 dark:text-blue-400 group-hover:underline">
+                    {s.task.length > 60 ? s.task.substring(0, 60) + '...' : s.task}
+                  </span>
+                  <span className="text-xs text-gray-400 font-mono">{s.id}</span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-gray-500">
+                  <span className="truncate max-w-[200px]">{s.repoUrl}</span>
+                  <span>{new Date(s.createdAt).toLocaleString()}</span>
+                </div>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 
