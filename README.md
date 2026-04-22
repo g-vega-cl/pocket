@@ -32,7 +32,8 @@ If using a Cloudflare Tunnel (e.g., `bolt.clvg.uk`):
 
 1. Paste GitHub repo URL
 2. Enter task description
-3. Clone → Create Branch
+3. (Optional) Provide a GitHub Token override if your global token is expired or you need different permissions
+4. Clone → Create Branch
 4. Chat with agent
 5. PR created to `pocket` branch
 

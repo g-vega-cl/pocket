@@ -15,9 +15,9 @@ describe('GitHub Tools', () => {
       expect(typeof createPullRequest).toBe('function');
     });
 
-    it('should require localPath, branchName, title, and body', async () => {
+    it('should take localPath, branchName, title, body, and optional token', async () => {
       const { createPullRequest } = await import('../tools/github.js');
-      expect(createPullRequest.length).toBe(4);
+      expect(createPullRequest.length).toBe(4); // Only positional arguments are counted
     });
   });
 

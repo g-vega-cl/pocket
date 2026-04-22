@@ -90,8 +90,26 @@ describe('Git Tools', () => {
     it('should call execSync with correct git push command', async () => {
       const { gitPush } = await import('../tools/git.js');
 
+      mockExecSync.mockReturnValueOnce(Buffer.from('https://github.com/owner/repo.git'));
+
       await gitPush('/tmp/pocket/test', 'pocket/123-test-branch');
 
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git -C /tmp/pocket/test push -u origin pocket/123-test-branch',
+        { stdio: 'inherit' }
+      );
+    });
+
+    it('should set remote url with token if token is provided', async () => {
+      const { gitPush } = await import('../tools/git.js');
+
+      mockExecSync.mockReturnValueOnce(Buffer.from('https://github.com/owner/repo.git'));
+
+      await gitPush('/tmp/pocket/test', 'pocket/123-test-branch', 'test-token');
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git -C /tmp/pocket/test remote set-url origin https://test-token@github.com/owner/repo.git'
+      );
       expect(mockExecSync).toHaveBeenCalledWith(
         'git -C /tmp/pocket/test push -u origin pocket/123-test-branch',
         { stdio: 'inherit' }
