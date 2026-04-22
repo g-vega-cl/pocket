@@ -112,6 +112,9 @@ async function gitCommit(localPath, message) {
 }
 
 async function gitPush(localPath, branchName, token = process.env.GITHUB_TOKEN) {
+  // Defensive: fall back to current branch if none provided
+  const effectiveBranch = branchName || execSync(`git -C ${localPath} rev-parse --abbrev-ref HEAD`).toString().trim();
+
   let remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
 
   const effectiveToken = token || process.env.GITHUB_TOKEN;
@@ -121,7 +124,7 @@ async function gitPush(localPath, branchName, token = process.env.GITHUB_TOKEN) 
     execSync(`git -C ${localPath} remote set-url origin ${authenticatedUrl}`);
   }
 
-  execSync(`git -C ${localPath} push -u origin ${branchName}`, { stdio: 'inherit' });
+  execSync(`git -C ${localPath} push -u origin ${effectiveBranch}`, { stdio: 'inherit' });
   return { success: true };
 }
 

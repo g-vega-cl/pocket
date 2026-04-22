@@ -115,6 +115,25 @@ describe('Git Tools', () => {
         { stdio: 'inherit' }
       );
     });
+
+    it('should auto-detect current branch when branchName is null', async () => {
+      const { gitPush } = await import('../tools/git.js');
+
+      // Call order: rev-parse (fallback) → remote get-url origin → push
+      mockExecSync
+        .mockReturnValueOnce(Buffer.from('main\n'))
+        .mockReturnValueOnce(Buffer.from('https://github.com/owner/repo.git'));
+
+      await gitPush('/tmp/pocket/test', null);
+
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git -C /tmp/pocket/test rev-parse --abbrev-ref HEAD'
+      );
+      expect(mockExecSync).toHaveBeenCalledWith(
+        'git -C /tmp/pocket/test push -u origin main',
+        { stdio: 'inherit' }
+      );
+    });
   });
 
   describe('gitStatus', () => {

@@ -261,7 +261,7 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
               pendingPermissions.set(requestId, resolve);
             });
           };
-          return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken);
+          return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
         },
         (raw) => send(ws, { type: 'debug', data: raw }),
         model
@@ -375,7 +375,7 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
   }
 }
 
-async function executeTool(localPath, toolName, args, requestPermission, githubToken = null) {
+async function executeTool(localPath, toolName, args, requestPermission, githubToken = null, branchName = null) {
   const isPathOutside = (targetPath) => {
     if (!targetPath) return false;
     const absoluteTarget = path.isAbsolute(targetPath) ? targetPath : path.join(localPath, targetPath);
@@ -412,7 +412,7 @@ async function executeTool(localPath, toolName, args, requestPermission, githubT
       return gitCommit(localPath, args.message);
 
     case 'git_push':
-      const pushResult = await gitPush(localPath, null, githubToken);
+      const pushResult = await gitPush(localPath, branchName, githubToken);
       return pushResult;
 
     case 'github_create_pr': {
