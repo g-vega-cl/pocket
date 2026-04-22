@@ -51,3 +51,7 @@ pnpm --filter web test            # Web (4 tests)
 | [Overview](docs/Overview.md) | Quick reference |
 | [Architecture](docs/Architecture.md) | Technical details |
 | [Tunnel Setup](docs/Tunnel.md) | Remote access |
+
+
+### ROADMAP
+- [ ] check if it can do web search
