@@ -1,6 +1,6 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-const DEFAULT_MODEL = 'openrouter/elephant-alpha';
+const DEFAULT_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free';
 
 const SYSTEM_PROMPT = `You are Pocket, an autonomous coding agent.
 
@@ -23,7 +23,7 @@ AVAILABLE TOOLS:
 - run_command(cmd) - Execute a shell command
 - git_commit(message) - Commit staged changes
 - git_push() - Push to remote
-- github_create_pr(title, body) - Create PR to pocket branch
+- github_create_pr(title, body) - Create a GitHub pull request
 
 IMPORTANT: Always commit and push before creating PR. PR title should be concise and descriptive.
 
@@ -170,7 +170,7 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
+      const lines = buffer.split('\\n');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
