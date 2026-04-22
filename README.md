@@ -54,5 +54,6 @@ cd apps/web && pnpm vitest run src/__tests__/  # Web (17 tests)
 
 
 ### ROADMAP
-- [x] Real-time thinking/reasoning indicator for reasoning models
 - [ ] check if it can do web search
+- [ ] add connection status in the main page too? How is it checked to begin with?
+- [ ] use image recognition as well, inspect visual changes just like Jules. Run tests and build too if there are any in the repo
