@@ -1,11 +1,12 @@
 import { Octokit } from 'octokit';
 import { parseRepoInfo } from './git.js';
 
-const octokit = new Octokit({
+const defaultOctokit = new Octokit({
   auth: process.env.GITHUB_TOKEN,
 });
 
-async function createPullRequest(localPath, branchName, title, body) {
+async function createPullRequest(localPath, branchName, title, body, token = process.env.GITHUB_TOKEN) {
+  const octokit = token ? new Octokit({ auth: token }) : defaultOctokit;
   const { execSync } = require('child_process');
   const remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
   const { owner, repo } = parseRepoInfo(remoteUrl);
@@ -18,7 +19,7 @@ async function createPullRequest(localPath, branchName, title, body) {
   } catch (e) {}
 
   try {
-    const { data } = await octokit.rest.repos.createOrUpdateProtectedBranchRequiredStatusChecks({
+    await octokit.rest.repos.createOrUpdateProtectedBranchRequiredStatusChecks({
       owner,
       repo,
       branch: baseBranch,

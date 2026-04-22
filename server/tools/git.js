@@ -50,7 +50,7 @@ function slugify(text) {
     .substring(0, 50);
 }
 
-async function gitClone(repoUrl) {
+async function gitClone(repoUrl, token = process.env.GITHUB_TOKEN) {
   ensureTempDir();
   const { owner, repo } = parseRepoInfo(repoUrl);
   const destName = `${owner}-${repo}-${randomUUID().substring(0, 8)}`;
@@ -60,7 +60,13 @@ async function gitClone(repoUrl) {
     execSync(`rm -rf ${localPath}`);
   }
 
-  execSync(`git clone ${repoUrl} ${localPath}`, { stdio: 'inherit' });
+  const effectiveToken = token || process.env.GITHUB_TOKEN;
+  let authenticatedUrl = repoUrl;
+  if (effectiveToken && repoUrl.includes('github.com')) {
+    authenticatedUrl = repoUrl.replace('https://github.com', `https://${effectiveToken}@github.com`);
+  }
+
+  execSync(`git clone ${authenticatedUrl} ${localPath}`, { stdio: 'inherit' });
 
   return { localPath, owner, repo };
 }
@@ -105,7 +111,16 @@ async function gitCommit(localPath, message) {
   return { success: true };
 }
 
-async function gitPush(localPath, branchName) {
+async function gitPush(localPath, branchName, token = process.env.GITHUB_TOKEN) {
+  let remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
+
+  const effectiveToken = token || process.env.GITHUB_TOKEN;
+  if (effectiveToken && remoteUrl.includes('github.com') && !remoteUrl.includes(`://${effectiveToken}@`)) {
+    // Inject token if not already present
+    const authenticatedUrl = remoteUrl.replace('https://github.com', `https://${effectiveToken}@github.com`);
+    execSync(`git -C ${localPath} remote set-url origin ${authenticatedUrl}`);
+  }
+
   execSync(`git -C ${localPath} push -u origin ${branchName}`, { stdio: 'inherit' });
   return { success: true };
 }

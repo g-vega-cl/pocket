@@ -38,6 +38,7 @@ function PocketApp() {
 
   const [repoUrl, setRepoUrl] = useState('');
   const [task, setTask] = useState('');
+  const [githubToken, setGithubToken] = useState('');
   const [inputValue, setInputValue] = useState('');
   const [sessionIdInput, setSessionIdInput] = useState('');
   const [selectedModel, setSelectedModel] = useState('openrouter/elephant-alpha');
@@ -69,7 +70,7 @@ function PocketApp() {
 
   const handleStart = () => {
     if (!repoUrl || !task) return;
-    createSession(repoUrl, task);
+    createSession(repoUrl, task, githubToken);
   };
 
   const handleStartLocal = () => {
@@ -153,6 +154,22 @@ function PocketApp() {
               rows={3}
               className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
             />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">
+              GitHub Token (Optional override)
+            </label>
+            <input
+              type="password"
+              value={githubToken}
+              onChange={(e) => setGithubToken(e.target.value)}
+              placeholder="ghp_xxxxxxxxxxxx"
+              className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
+            <p className="text-xs text-gray-500 mt-1">
+              Uses GITHUB_TOKEN from .env if left blank. Use this if you need to provide new
+              credentials.
+            </p>
           </div>
           <div className="flex gap-4">
             <button

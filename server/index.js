@@ -115,8 +115,8 @@ async function handleMessage(ws, message) {
     }
 
     case 'create_session': {
-      const { repoUrl, task } = payload;
-      const session = createSession({ repoUrl, task });
+      const { repoUrl, task, githubToken } = payload;
+      const session = createSession({ repoUrl, task, githubToken });
       clients.set(session.id, ws);
       send(ws, { type: 'session_created', sessionId: session.id });
       broadcastSessionList();
@@ -174,7 +174,7 @@ async function handleMessage(ws, message) {
       send(ws, { type: 'status', status: 'cloning', message: 'Cloning repository...' });
 
       try {
-        const { localPath } = await gitClone(session.repoUrl);
+        const { localPath } = await gitClone(session.repoUrl, session.githubToken);
         updateSession(sessionId, { localPath, status: 'cloned' });
         send(ws, { type: 'status', status: 'cloned', message: 'Repository cloned', localPath });
       } catch (error) {
@@ -202,7 +202,7 @@ async function handleMessage(ws, message) {
       try {
         const { branchName } = await gitCreateBranch(session.localPath, session.task);
         send(ws, { type: 'status', status: 'creating_branch', message: 'Pushing branch to origin...' });
-        await gitPush(session.localPath, branchName);
+        await gitPush(session.localPath, branchName, session.githubToken);
         updateSession(sessionId, { branchName, status: 'ready' });
         send(ws, { type: 'status', status: 'ready', message: 'Branch created and pushed', branchName });
       } catch (error) {
@@ -261,7 +261,7 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
               pendingPermissions.set(requestId, resolve);
             });
           };
-          return await executeTool(session.localPath, toolName, args, requestPermission);
+          return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken);
         },
         (raw) => send(ws, { type: 'debug', data: raw }),
         model
@@ -278,9 +278,9 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
 
           if (!session.isLocal) {
             send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
-            await gitPush(session.localPath, session.branchName);
+            await gitPush(session.localPath, session.branchName, session.githubToken);
             send(ws, { type: 'status', status: 'working', message: 'Creating pull request...' });
-            const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`);
+            const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`, session.githubToken);
             prUrl = prResult.prUrl;
             if (prUrl) {
               updateSession(sessionId, { prUrl });
@@ -320,7 +320,7 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
         await gitCommit(session.localPath, `Pocket: ${session.task}`);
         if (!session.isLocal) {
           send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
-          await gitPush(session.localPath, session.branchName);
+          await gitPush(session.localPath, session.branchName, session.githubToken);
           send(ws, { type: 'status', status: 'ready', message: 'Committed and pushed!' });
         } else {
           send(ws, { type: 'status', status: 'ready', message: 'Committed locally!' });
@@ -345,7 +345,7 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
 
       try {
         send(ws, { type: 'status', status: 'working', message: 'Creating pull request...' });
-        const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}`);
+        const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}`, session.githubToken);
         if (prResult.prUrl) {
           updateSession(sessionId, { prUrl: prResult.prUrl });
           send(ws, { type: 'status', status: 'ready', message: 'PR created!', prUrl: prResult.prUrl });
@@ -375,7 +375,7 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
   }
 }
 
-async function executeTool(localPath, toolName, args, requestPermission) {
+async function executeTool(localPath, toolName, args, requestPermission, githubToken = null) {
   const isPathOutside = (targetPath) => {
     if (!targetPath) return false;
     const absoluteTarget = path.isAbsolute(targetPath) ? targetPath : path.join(localPath, targetPath);
@@ -412,7 +412,7 @@ async function executeTool(localPath, toolName, args, requestPermission) {
       return gitCommit(localPath, args.message);
 
     case 'git_push':
-      const pushResult = await gitPush(localPath, null);
+      const pushResult = await gitPush(localPath, null, githubToken);
       return pushResult;
 
     case 'github_create_pr': {
@@ -424,7 +424,7 @@ async function executeTool(localPath, toolName, args, requestPermission) {
         const match = remoteUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
         if (match) {
           const { createPullRequest: createPR } = await import('./tools/github.js');
-          return createPR(localPath, sess.branchName, args.title, args.body);
+          return createPR(localPath, sess.branchName, args.title, args.body, githubToken);
         }
       }
       return { error: 'Could not determine repo info' };

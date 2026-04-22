@@ -270,7 +270,7 @@ export function usePocket(wsUrl: string) {
   }, []);
 
   const createSession = useCallback(
-    (repoUrl: string, task: string) => {
+    (repoUrl: string, task: string, githubToken?: string) => {
       setState((prev) => ({
         ...prev,
         isLoading: true,
@@ -286,7 +286,7 @@ export function usePocket(wsUrl: string) {
         messages: [],
         error: null,
       }));
-      send({ type: 'create_session', payload: { repoUrl, task } });
+      send({ type: 'create_session', payload: { repoUrl, task, githubToken } });
     },
     [send]
   );
