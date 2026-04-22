@@ -221,4 +221,88 @@ describe('usePocket Hook', () => {
     });
     expect(result.current.connected).toBe(true);
   });
+
+  it('should set isLoading=false when status is ready', async () => {
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+
+    act(() => {
+      mockWs.onopen?.();
+    });
+
+    act(() => {
+      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'ready', message: 'Ready!' }) });
+    });
+
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('should set isLoading=false when status is done', async () => {
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+
+    act(() => {
+      mockWs.onopen?.();
+    });
+
+    act(() => {
+      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'done' }) });
+    });
+
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('should set isLoading=false when status is error', async () => {
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+
+    act(() => {
+      mockWs.onopen?.();
+    });
+
+    act(() => {
+      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'error' }) });
+    });
+
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it('should set isLoading=true when status is cloning', async () => {
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+
+    act(() => {
+      mockWs.onopen?.();
+    });
+
+    act(() => {
+      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'cloning', message: 'Cloning...' }) });
+    });
+
+    expect(result.current.isLoading).toBe(true);
+  });
+
+  it('should set isLoading=true when status is creating_branch', async () => {
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+
+    act(() => {
+      mockWs.onopen?.();
+    });
+
+    act(() => {
+      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'creating_branch' }) });
+    });
+
+    expect(result.current.isLoading).toBe(true);
+  });
+
+  it('should set isLoading=true when status is working', async () => {
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+
+    act(() => {
+      mockWs.onopen?.();
+    });
+
+    act(() => {
+      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'working', message: 'Working...' }) });
+    });
+
+    expect(result.current.isLoading).toBe(true);
+  });
 });

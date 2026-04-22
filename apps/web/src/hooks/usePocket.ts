@@ -173,7 +173,7 @@ export function usePocket(wsUrl: string) {
                 branchName: msg.branchName ?? prev.session.branchName,
               }
             : null,
-          isLoading: ['cloning', 'creating_branch'].includes(msg.status),
+          isLoading: !['ready', 'done', 'error'].includes(msg.status),
           notification: msg.message ?? null,
         }));
 

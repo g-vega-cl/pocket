@@ -104,6 +104,8 @@ Server → Client: `session_created`, `session_resumed`, `sessions_list`, `statu
 
 **Note**: `status` messages include a `message` field for feedback (e.g., "Committed and pushed!", "PR created!"). `debug` messages contain raw LLM response data for debugging.
 
+**Loading State**: The frontend derives `isLoading` from status messages. When status is `cloning`, `creating_branch`, or `working`, the UI shows a loading indicator. Terminal states (`ready`, `done`, `error`) clear the loading indicator.
+
 **Thinking Flow**: When a `chat` message is sent, the server emits `thinking_start` before the first OpenRouter request. If the model supports reasoning, `reasoning` chunks stream in real time. Once content tokens arrive (`token`), the frontend switches from the generic "Thinking..." indicator to displaying the actual response.
 
 ## Session
