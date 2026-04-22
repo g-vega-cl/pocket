@@ -26,6 +26,14 @@ Frontend (React) → WebSocket Server → Tools (Git, Files, GitHub)
 `apps/web/src/routes/pocket.tsx` - Chat UI
 `apps/web/src/hooks/usePocket.ts` - WebSocket client
 
+### SSR & Hydration
+
+The app uses TanStack Start with SSR. To prevent hydration mismatches:
+
+- `usePocket` only connects to WebSocket when `wsUrl` is provided
+- `wsUrl` is set in a `useEffect` (runs after hydration), ensuring server and client render with identical initial state
+- This prevents the "A tree hydrated but some attributes didn't match" React warning
+
 ## Backend
 
 `server/index.js` - WebSocket + Express server

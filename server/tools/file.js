@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
+import { execSync } from 'child_process';
 
 function readFile(localPath, filePath) {
   const fullPath = resolve(localPath, filePath);
@@ -19,7 +20,6 @@ function writeFile(localPath, filePath, content) {
 }
 
 function listFiles(localPath, extension = null) {
-  const { execSync } = require('child_process');
   let cmd = `find ${localPath} -type f -name "*.${extension}" 2>/dev/null | head -100`;
   if (!extension) {
     cmd = `find ${localPath} -type f ! -path "*/.git/*" 2>/dev/null | head -100`;

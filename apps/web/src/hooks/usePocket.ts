@@ -200,16 +200,18 @@ export function usePocket(wsUrl: string) {
 
       case 'reasoning':
         setState((prev) => {
-          const lastMsg = prev.messages[prev.messages.length - 1];
-          if (lastMsg?.role === 'assistant') {
-            return {
-              ...prev,
-              isThinking: false,
-              messages: [
-                ...prev.messages.slice(0, -1),
-                { ...lastMsg, reasoning: (lastMsg.reasoning || '') + msg.content },
-              ],
-            };
+          if (prev.messages.length > 0) {
+            const lastMsg = prev.messages[prev.messages.length - 1];
+            if (lastMsg.role === 'assistant') {
+              return {
+                ...prev,
+                isThinking: false,
+                messages: [
+                  ...prev.messages.slice(0, -1),
+                  { ...lastMsg, reasoning: (lastMsg.reasoning || '') + msg.content },
+                ],
+              };
+            }
           }
           return {
             ...prev,
@@ -221,16 +223,18 @@ export function usePocket(wsUrl: string) {
 
       case 'token':
         setState((prev) => {
-          const lastMsg = prev.messages[prev.messages.length - 1];
-          if (lastMsg?.role === 'assistant') {
-            return {
-              ...prev,
-              isThinking: false,
-              messages: [
-                ...prev.messages.slice(0, -1),
-                { ...lastMsg, content: lastMsg.content + msg.content },
-              ],
-            };
+          if (prev.messages.length > 0) {
+            const lastMsg = prev.messages[prev.messages.length - 1];
+            if (lastMsg.role === 'assistant') {
+              return {
+                ...prev,
+                isThinking: false,
+                messages: [
+                  ...prev.messages.slice(0, -1),
+                  { ...lastMsg, content: lastMsg.content + msg.content },
+                ],
+              };
+            }
           }
           return {
             ...prev,
@@ -403,9 +407,7 @@ export function usePocket(wsUrl: string) {
   );
 
   const disconnect = useCallback(() => {
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
+    clearTimeout(reconnectTimeoutRef.current);
     wsRef.current?.close();
     wsRef.current = null;
   }, []);
@@ -425,9 +427,10 @@ export function usePocket(wsUrl: string) {
   );
 
   useEffect(() => {
+    if (!wsUrl) return;
     connect();
     return () => disconnect();
-  }, [connect, disconnect]);
+  }, [connect, disconnect, wsUrl]);
 
   return {
     ...state,

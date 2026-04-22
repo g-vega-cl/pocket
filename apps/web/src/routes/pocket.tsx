@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useRef, useEffect } from 'react';
-import { usePocket, type SessionStatus } from '#/hooks/usePocket';
+import { usePocket } from '#/hooks/usePocket';
+import type { SessionStatus } from '#/hooks/usePocket';
 
 export const Route = createFileRoute('/pocket')({
   component: PocketApp,
@@ -8,8 +9,10 @@ export const Route = createFileRoute('/pocket')({
 
 export function PocketApp() {
   const [wsUrl, setWsUrl] = useState<string>('');
+  const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
+    setIsMounted(true);
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     setWsUrl(`${protocol}//${window.location.host}/ws`);
   }, []);
@@ -96,7 +99,7 @@ export function PocketApp() {
 
   const handleSendMessage = (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!inputValue.trim() || !session?.id?.trim() || isLoading) return;
+    if (!inputValue.trim() || !session?.id.trim() || isLoading) return;
     sendMessage(session.id, inputValue, selectedModel);
     setInputValue('');
   };
@@ -337,13 +340,13 @@ export function PocketApp() {
               {session?.status === 'cloning' ? 'Cloning...' : 'Clone Repo'}
             </button>
           )}
-          {session?.localPath && !session?.branchName && (
+          {session && session.localPath && !session.branchName && (
             <button
               onClick={handleCreateBranch}
-              disabled={session?.status === 'creating_branch'}
+              disabled={session.status === 'creating_branch'}
               className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50"
             >
-              {session?.status === 'creating_branch' ? 'Creating...' : 'Create Branch'}
+              {session.status === 'creating_branch' ? 'Creating...' : 'Create Branch'}
             </button>
           )}
         </div>
@@ -386,10 +389,10 @@ export function PocketApp() {
 
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm overflow-hidden">
         <div className="h-96 overflow-y-auto p-4 space-y-4">
-          {messages.length === 0 && session?.status === 'ready' && (
+          {messages.length === 0 && session && session.status === 'ready' && (
             <div className="text-center text-gray-500 py-8">
               <p className="text-lg mb-2">Ready to assist!</p>
-              <p>Task: {session?.task}</p>
+              <p>Task: {session.task}</p>
             </div>
           )}
 

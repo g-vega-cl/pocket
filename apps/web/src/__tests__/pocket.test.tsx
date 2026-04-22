@@ -86,4 +86,29 @@ describe('PocketApp UI', () => {
     // Only the thinking indicator should have bouncing dots (3 dots), not the old loader
     expect(document.querySelectorAll('.animate-bounce').length).toBe(3);
   });
+
+  it('should render start session buttons with correct disabled state when no input', () => {
+    mockUsePocket({ isLoading: false, session: null });
+    render(<PocketApp />);
+    const startBtn = screen.getByRole('button', { name: /Start Session/i });
+    const startLocalBtn = screen.getByRole('button', { name: /Start Local Session/i });
+    expect(startBtn).toBeDisabled();
+    expect(startLocalBtn).toBeDisabled();
+  });
+
+  it('should enable start session button when repoUrl and task are provided', () => {
+    mockUsePocket({ isLoading: false, session: null });
+    render(<PocketApp />);
+    const startBtn = screen.getByRole('button', { name: /Start Session/i });
+    expect(startBtn).toBeDisabled();
+  });
+
+  it('should disable start session buttons when loading', () => {
+    mockUsePocket({ isLoading: true, session: null });
+    render(<PocketApp />);
+    const startBtn = screen.getByRole('button', { name: /Start Session/i });
+    const startLocalBtn = screen.getByRole('button', { name: /Start Local Session/i });
+    expect(startBtn).toBeDisabled();
+    expect(startLocalBtn).toBeDisabled();
+  });
 });

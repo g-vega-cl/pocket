@@ -208,4 +208,17 @@ describe('usePocket Hook', () => {
 
     expect(result.current.isThinking).toBe(false);
   });
+
+  it('should not connect when wsUrl is empty', async () => {
+    const { result } = renderHook(() => usePocket(''));
+    expect(result.current.connected).toBe(false);
+  });
+
+  it('should connect when wsUrl is provided', async () => {
+    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+    act(() => {
+      mockWs.onopen?.();
+    });
+    expect(result.current.connected).toBe(true);
+  });
 });

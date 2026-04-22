@@ -11,6 +11,7 @@ import { readFile, writeFile } from './tools/file.js';
 import { runCommand } from './tools/command.js';
 import { createPullRequest } from './tools/github.js';
 import { buildSystemMessage, streamChat } from './llm.js';
+import { execSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -417,12 +418,11 @@ async function executeTool(localPath, toolName, args, requestPermission, githubT
       const pushResult = await gitPush(localPath, branchName, githubToken);
       return pushResult;
 
-    case 'github_create_pr': {
-      const session = Array.from(clients.entries()).find(([, ws]) => ws.readyState === 1)?.[0];
-      const sess = session ? getSession(session) : null;
-      if (sess) {
-        const { execSync } = require('child_process');
-        const remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
+     case 'github_create_pr': {
+       const session = Array.from(clients.entries()).find(([, ws]) => ws.readyState === 1)?.[0];
+       const sess = session ? getSession(session) : null;
+       if (sess) {
+         const remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
         const match = remoteUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
         if (match) {
           const { createPullRequest: createPR } = await import('./tools/github.js');

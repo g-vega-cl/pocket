@@ -1,5 +1,6 @@
 import { Octokit } from 'octokit';
 import { parseRepoInfo } from './git.js';
+import { execSync } from 'child_process';
 
 const defaultOctokit = new Octokit({
   auth: process.env.GITHUB_TOKEN,
@@ -7,7 +8,6 @@ const defaultOctokit = new Octokit({
 
 async function createPullRequest(localPath, branchName, title, body, token = process.env.GITHUB_TOKEN) {
   const octokit = token ? new Octokit({ auth: token }) : defaultOctokit;
-  const { execSync } = require('child_process');
   const remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
   const { owner, repo } = parseRepoInfo(remoteUrl);
 
@@ -52,8 +52,6 @@ async function createPullRequest(localPath, branchName, title, body, token = pro
 }
 
 async function ensurePocketBranch(localPath, owner, repo) {
-  const { execSync } = require('child_process');
-
   try {
     execSync(`git -C ${localPath} checkout pocket`, { stdio: 'ignore' });
   } catch (e) {
