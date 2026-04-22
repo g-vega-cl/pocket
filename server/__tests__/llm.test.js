@@ -244,5 +244,246 @@ describe('LLM Client', () => {
       expect(startCall?.status).toBe('start');
       expect(fetchCallCount).toBe(2);
     });
+
+    it('should call onStartTurn before each API request', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const startTurns = [];
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi.fn().mockResolvedValue({ done: true, value: new Uint8Array() }),
+          }),
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Hello' }],
+        () => {},
+        () => {},
+        async () => ({ success: true }),
+        null,
+        () => startTurns.push('start')
+      );
+
+      expect(startTurns).toHaveLength(1);
+      expect(startTurns[0]).toBe('start');
+      expect(global.fetch).toHaveBeenCalledOnce();
+    });
+
+    it('should call onStartTurn on each multi-turn loop iteration', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const startTurns = [];
+      let fetchCallCount = 0;
+
+      global.fetch = vi.fn().mockImplementation(() => {
+        const currentFetch = fetchCallCount++;
+        const mockGetReader = () => {
+          let readCount = 0;
+          return {
+            read: async () => {
+              readCount++;
+              if (currentFetch === 0) {
+                if (readCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"read_file","arguments":"{\\"path\\":\\"test.js\\"}"},"id":"call_123"}]}}]}\n'),
+                  };
+                }
+                if (readCount === 2) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"finish_reason":"tool_calls"}]}\n'),
+                  };
+                }
+              } else {
+                if (readCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Done"}}]}\n'),
+                  };
+                }
+              }
+              return { done: true, value: new Uint8Array() };
+            },
+          };
+        };
+        return Promise.resolve({
+          ok: true,
+          body: { getReader: mockGetReader },
+        });
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Read the file' }],
+        () => {},
+        () => {},
+        async () => ({ success: true }),
+        null,
+        () => startTurns.push('start')
+      );
+
+      expect(startTurns).toHaveLength(2);
+    });
+
+    it('should forward delta.reasoning via onReasoning', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const reasoningChunks = [];
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => {
+            let callCount = 0;
+            return {
+              read: async () => {
+                callCount++;
+                if (callCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"reasoning":"Let me think"}}]}\n'),
+                  };
+                }
+                return { done: true, value: new Uint8Array() };
+              },
+            };
+          },
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Hello' }],
+        () => {},
+        () => {},
+        async () => ({ success: true }),
+        null,
+        null,
+        (chunk) => reasoningChunks.push(chunk)
+      );
+
+      expect(reasoningChunks).toHaveLength(1);
+      expect(reasoningChunks[0]).toBe('Let me think');
+    });
+
+    it('should forward delta.reasoning_content via onReasoning', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const reasoningChunks = [];
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => {
+            let callCount = 0;
+            return {
+              read: async () => {
+                callCount++;
+                if (callCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"reasoning_content":"Alternative field"}}]}\n'),
+                  };
+                }
+                return { done: true, value: new Uint8Array() };
+              },
+            };
+          },
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Hello' }],
+        () => {},
+        () => {},
+        async () => ({ success: true }),
+        null,
+        null,
+        (chunk) => reasoningChunks.push(chunk)
+      );
+
+      expect(reasoningChunks).toHaveLength(1);
+      expect(reasoningChunks[0]).toBe('Alternative field');
+    });
+
+    it('should forward both reasoning and content in same stream without interference', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const contentChunks = [];
+      const reasoningChunks = [];
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => {
+            let callCount = 0;
+            return {
+              read: async () => {
+                callCount++;
+                if (callCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"reasoning":"Thinking..."}}]}\ndata: {"choices":[{"delta":{"content":"Hello"}}]}\n'),
+                  };
+                }
+                return { done: true, value: new Uint8Array() };
+              },
+            };
+          },
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Hello' }],
+        (chunk) => contentChunks.push(chunk),
+        () => {},
+        async () => ({ success: true }),
+        null,
+        null,
+        (chunk) => reasoningChunks.push(chunk)
+      );
+
+      expect(reasoningChunks).toHaveLength(1);
+      expect(reasoningChunks[0]).toBe('Thinking...');
+      expect(contentChunks).toHaveLength(1);
+      expect(contentChunks[0]).toBe('Hello');
+    });
+
+    it('should not call onReasoning when no reasoning present in stream', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const reasoningChunks = [];
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        body: {
+          getReader: () => {
+            let callCount = 0;
+            return {
+              read: async () => {
+                callCount++;
+                if (callCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Hello world"}}]}\n'),
+                  };
+                }
+                return { done: true, value: new Uint8Array() };
+              },
+            };
+          },
+        },
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Hello' }],
+        (chunk) => {},
+        () => {},
+        async () => ({ success: true }),
+        null,
+        null,
+        (chunk) => reasoningChunks.push(chunk)
+      );
+
+      expect(reasoningChunks).toHaveLength(0);
+    });
   });
 });

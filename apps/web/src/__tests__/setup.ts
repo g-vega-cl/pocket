@@ -10,3 +10,5 @@ global.WebSocket = vi.fn(() => ({
   onmessage: null,
   onerror: null,
 })) as any;
+
+Element.prototype.scrollIntoView = vi.fn();

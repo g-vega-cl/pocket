@@ -129,10 +129,11 @@ function buildToolDefinitions() {
   ];
 }
 
-async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, model = DEFAULT_MODEL) {
+async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onStartTurn, onReasoning, model = DEFAULT_MODEL) {
   const allMessages = [...messages];
 
   async function makeRequest(reqMessages) {
+    if (onStartTurn) onStartTurn();
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -187,6 +188,11 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, mod
           if (delta?.content && typeof delta.content === 'string' && delta.content) {
             assistantMessage += delta.content;
             onChunk(delta.content);
+          }
+
+          const reasoning = delta?.reasoning || delta?.reasoning_content;
+          if (reasoning && typeof reasoning === 'string' && onReasoning) {
+            onReasoning(reasoning);
           }
 
           if (delta?.tool_calls && delta.tool_calls.length > 0) {

@@ -6,7 +6,7 @@ export const Route = createFileRoute('/pocket')({
   component: PocketApp,
 });
 
-function PocketApp() {
+export function PocketApp() {
   const [wsUrl, setWsUrl] = useState<string>('');
 
   useEffect(() => {
@@ -20,6 +20,7 @@ function PocketApp() {
     sessions,
     messages,
     isLoading,
+    isThinking,
     currentToolCall,
     error,
     prUrl,
@@ -406,6 +407,12 @@ function PocketApp() {
                       : 'bg-gray-100 dark:bg-gray-700'
                 }`}
               >
+                {msg.role === 'assistant' && msg.reasoning && (
+                  <div className="mb-2 pb-2 border-b border-gray-300 dark:border-gray-600">
+                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Thinking</p>
+                    <pre className="whitespace-pre-wrap font-sans text-sm text-gray-600 dark:text-gray-300">{msg.reasoning}</pre>
+                  </div>
+                )}
                 <pre className="whitespace-pre-wrap font-sans text-sm">{msg.content}</pre>
               </div>
             </div>
@@ -432,7 +439,26 @@ function PocketApp() {
             </div>
           )}
 
-          {isLoading && !currentToolCall && (
+          {isThinking && (
+            <div className="flex justify-start">
+              <div className="bg-gray-100 dark:bg-gray-700 rounded-xl px-4 py-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                  <span
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: '0.1s' }}
+                  />
+                  <span
+                    className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
+                    style={{ animationDelay: '0.2s' }}
+                  />
+                  <span className="text-sm text-gray-500 ml-1">Thinking...</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {isLoading && !currentToolCall && !isThinking && (
             <div className="flex justify-start">
               <div className="bg-gray-100 dark:bg-gray-700 rounded-xl px-4 py-3">
                 <div className="flex gap-1">

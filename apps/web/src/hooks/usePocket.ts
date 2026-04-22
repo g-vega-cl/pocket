@@ -13,6 +13,7 @@ export type SessionStatus =
 export interface Message {
   role: 'user' | 'assistant' | 'system';
   content: string;
+  reasoning?: string;
 }
 
 export interface Session {
@@ -46,6 +47,7 @@ interface PocketState {
   sessions: SessionListItem[];
   messages: Message[];
   isLoading: boolean;
+  isThinking: boolean;
   currentToolCall: ToolCall | null;
   prUrl: string | null;
   error: string | null;
@@ -65,6 +67,8 @@ type ServerMessage =
   | { type: 'sessions_list'; sessions: SessionListItem[] }
   | { type: 'status'; status: SessionStatus; message?: string; localPath?: string; branchName?: string }
   | { type: 'user_message'; content: string }
+  | { type: 'thinking_start' }
+  | { type: 'reasoning'; content: string }
   | { type: 'token'; content: string }
   | { type: 'tool_start'; tool: string; args: Record<string, unknown> }
   | { type: 'tool_result'; tool: string; result: unknown }
@@ -81,6 +85,7 @@ export function usePocket(wsUrl: string) {
     sessions: [],
     messages: [],
     isLoading: false,
+    isThinking: false,
     currentToolCall: null,
     prUrl: null,
     error: null,
@@ -186,12 +191,41 @@ export function usePocket(wsUrl: string) {
         }));
         break;
 
+      case 'thinking_start':
+        setState((prev) => ({
+          ...prev,
+          isThinking: true,
+        }));
+        break;
+
+      case 'reasoning':
+        setState((prev) => {
+          const lastMsg = prev.messages[prev.messages.length - 1];
+          if (lastMsg?.role === 'assistant') {
+            return {
+              ...prev,
+              isThinking: false,
+              messages: [
+                ...prev.messages.slice(0, -1),
+                { ...lastMsg, reasoning: (lastMsg.reasoning || '') + msg.content },
+              ],
+            };
+          }
+          return {
+            ...prev,
+            isThinking: false,
+            messages: [...prev.messages, { role: 'assistant', content: '', reasoning: msg.content }],
+          };
+        });
+        break;
+
       case 'token':
         setState((prev) => {
           const lastMsg = prev.messages[prev.messages.length - 1];
           if (lastMsg?.role === 'assistant') {
             return {
               ...prev,
+              isThinking: false,
               messages: [
                 ...prev.messages.slice(0, -1),
                 { ...lastMsg, content: lastMsg.content + msg.content },
@@ -200,6 +234,7 @@ export function usePocket(wsUrl: string) {
           }
           return {
             ...prev,
+            isThinking: false,
             messages: [...prev.messages, { role: 'assistant', content: msg.content }],
           };
         });
@@ -232,6 +267,7 @@ export function usePocket(wsUrl: string) {
         setState((prev) => ({
           ...prev,
           isLoading: false,
+          isThinking: false,
           currentToolCall: null,
           prUrl: msg.prUrl ?? prev.prUrl,
           session: prev.session ? { ...prev.session, status: 'done' } : null,
@@ -245,7 +281,17 @@ export function usePocket(wsUrl: string) {
         setState((prev) => ({
           ...prev,
           isLoading: false,
+          isThinking: false,
           error: msg.error,
+        }));
+        break;
+
+      case 'aborted':
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          isThinking: false,
+          currentToolCall: null,
         }));
         break;
 

@@ -264,6 +264,8 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
           return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
         },
         (raw) => send(ws, { type: 'debug', data: raw }),
+        () => send(ws, { type: 'thinking_start' }),
+        (chunk) => send(ws, { type: 'reasoning', content: chunk }),
         model
       );
 

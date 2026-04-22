@@ -37,6 +37,8 @@ Frontend (React) → WebSocket Server → Tools (Git, Files, GitHub)
 The `streamChat` function handles OpenRouter's streaming API with tool calling:
 
 - Supports both string and array formats for `delta.content` (various LLM providers return different formats)
+- Extracts reasoning content from `delta.reasoning` (DeepSeek) or `delta.reasoning_content` (other providers) and forwards it via `onReasoning`
+- Calls `onStartTurn` before each API request (including multi-turn loops after tool execution)
 - Accumulates tool arguments across streaming chunks
 - Handles `delta.tool_calls` format for tool call streaming
 - Calls `onChunk` for text tokens and `onToolCall` for tool use (start/complete)
@@ -50,6 +52,8 @@ streamChat(
   onToolCall: (toolCall: {name, arguments, status, result?}) => void,
   executeTool: (toolName: string, args: object) => Promise<object>,
   onRaw?: (data: object) => void,
+  onStartTurn?: () => void,
+  onReasoning?: (text: string) => void,
   model?: string
 )
 ```
@@ -88,9 +92,11 @@ Repositories are cloned to `{os.tmpdir()}/pocket` (e.g., `/tmp/pocket` on Linux,
 ## WebSocket Protocol
 
 Client → Server: `create_session`, `resume_session`, `list_sessions`, `clone`, `create_branch`, `chat`, `commit`, `create_pr`
-Server → Client: `session_created`, `session_resumed`, `sessions_list`, `status`, `token`, `tool_start`, `tool_result`, `debug`, `error`
+Server → Client: `session_created`, `session_resumed`, `sessions_list`, `status`, `thinking_start`, `reasoning`, `token`, `tool_start`, `tool_result`, `debug`, `error`
 
 **Note**: `status` messages include a `message` field for feedback (e.g., "Committed and pushed!", "PR created!"). `debug` messages contain raw LLM response data for debugging.
+
+**Thinking Flow**: When a `chat` message is sent, the server emits `thinking_start` before the first OpenRouter request. If the model supports reasoning, `reasoning` chunks stream in real time. Once content tokens arrive (`token`), the frontend switches from the generic "Thinking..." indicator to displaying the actual response.
 
 ## Session
 
@@ -145,6 +151,8 @@ main → pocket (mirror) → pocket/{timestamp}-{slug} (agent branch) → PR to 
 
 The chat interface provides:
 - **Message input**: Type messages to chat with the agent
+- **Thinking indicator**: Animated "Thinking..." badge shown while the LLM is processing, before any tokens arrive
+- **Reasoning panel**: For reasoning-capable models (DeepSeek-R1, Claude 3.7 Sonnet, etc.), the model's internal reasoning is streamed and displayed above the final response in the assistant's message bubble
 - **Commit button**: Manually commits and pushes current changes
 - **Create PR button**: Creates a pull request to the `pocket` branch
 - **View PR link**: Appears after a PR is created

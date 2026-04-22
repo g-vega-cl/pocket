@@ -40,8 +40,8 @@ If using a Cloudflare Tunnel (e.g., `bolt.clvg.uk`):
 ## Test
 
 ```bash
-pnpm --filter pocket-server test   # Server (41 tests)
-pnpm --filter web test            # Web (4 tests)
+pnpm vitest run server/__tests__/          # Server (70 tests)
+cd apps/web && pnpm vitest run src/__tests__/  # Web (17 tests)
 ```
 
 ## Docs
@@ -54,4 +54,5 @@ pnpm --filter web test            # Web (4 tests)
 
 
 ### ROADMAP
+- [x] Real-time thinking/reasoning indicator for reasoning models
 - [ ] check if it can do web search
