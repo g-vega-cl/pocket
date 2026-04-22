@@ -96,13 +96,29 @@ Server → Client: `session_created`, `session_resumed`, `sessions_list`, `statu
 
 ```js
 {
-  id, repoUrl, task, localPath, branchName,
+  id, repoUrl, task, githubToken, localPath, branchName,
   history: [{role, content}],
   status, // created|cloning|cloned|creating_branch|ready|working|done|error
   createdAt,
   lastActivity
 }
 ```
+
+## Authentication
+
+Pocket supports automated GitHub authentication via Personal Access Tokens (PATs).
+
+1. **Default:** Uses `GITHUB_TOKEN` from the server's `.env` file.
+2. **Override:** Users can provide a specific token when starting a new session in the UI.
+
+### Git Operations
+For `git clone` and `git push`, Pocket injects the token directly into the HTTPS URL:
+`https://<token>@github.com/owner/repo.git`
+
+This ensures all operations are non-interactive and bypasses the need for SSH keys in most server environments.
+
+### GitHub API
+Tool-based operations like `github_create_pr` use the token to initialize an `Octokit` instance.
 
 ## URL Strategy
 

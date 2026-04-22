@@ -20,6 +20,7 @@ describe('Session Management', () => {
       expect(session).toMatchObject({
         repoUrl: 'https://github.com/test/repo',
         task: 'Fix a bug',
+        githubToken: null,
         localPath: null,
         branchName: null,
         status: 'created',
@@ -35,6 +36,16 @@ describe('Session Management', () => {
       const session2 = createSession({ repoUrl: 'https://github.com/b/repo', task: 't2' });
 
       expect(session1.id).not.toBe(session2.id);
+    });
+
+    it('should store an optional githubToken', () => {
+      const session = createSession({
+        repoUrl: 'https://github.com/test/repo',
+        task: 'Fix a bug',
+        githubToken: 'ghp_test_token',
+      });
+
+      expect(session.githubToken).toBe('ghp_test_token');
     });
   });
 
