@@ -20,6 +20,7 @@ Self-hosted autonomous coding agent. Chat with an AI to work on GitHub repos.
 5. Use "Commit" to manually commit anytime, "Create PR" to create a pull request
 6. **Session History**: Revisit past sessions from the "Session History" list below the form.
 7. **URL Persistence**: Reloading the page keeps your current session active thanks to the `sessionId` URL parameter.
+8. **Persistent Sessions**: Sessions and their workspaces are persistent. The agent can continue working in the background even if you close the browser tab.
 
 ## Architecture
 

@@ -21,6 +21,9 @@ pnpm web:dev    # Frontend on :3000
 
 Access: http://localhost:3000/pocket
 
+### Persistence
+Pocket sessions are persistent. If you close your browser or refresh the page, the agent continues working in the background. You can resume any session from the "Session History" list or by using its unique URL.
+
 ### Deployment with Cloudflare Tunnel
 
 If using a Cloudflare Tunnel (e.g., `bolt.clvg.uk`):

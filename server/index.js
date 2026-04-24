@@ -51,19 +51,6 @@ wss.on('connection', (ws) => {
     for (const [sessionId, clientWs] of clients) {
       if (clientWs === ws) {
         clients.delete(sessionId);
-
-          // Cleanup local session temp folder
-          const session = getSession(sessionId);
-          if (session && session.isLocal && session.localPath) {
-            import('fs').then(fs => {
-              if (fs.existsSync(session.localPath)) {
-                console.log(`Cleaning up local session: ${session.localPath}`);
-                import('child_process').then(cp => {
-                  cp.exec(`rm -rf ${session.localPath}`);
-                });
-              }
-            });
-          }
         break;
       }
     }
@@ -118,6 +105,7 @@ async function handleMessage(ws, message) {
     case 'create_session': {
       const { repoUrl, task, githubToken } = payload;
       const session = createSession({ repoUrl, task, githubToken });
+      console.log(`[Session] Created session ${session.id} for repo ${repoUrl}`);
       clients.set(session.id, ws);
       send(ws, { type: 'session_created', sessionId: session.id });
       broadcastSessionList();
@@ -127,6 +115,7 @@ async function handleMessage(ws, message) {
     case 'create_local_session': {
       const { task } = payload;
       const session = createSession({ repoUrl: 'local', task, isLocal: true });
+      console.log(`[Session] Created local session ${session.id}`);
       clients.set(session.id, ws);
       send(ws, { type: 'session_created', sessionId: session.id });
       broadcastSessionList();
@@ -146,9 +135,11 @@ async function handleMessage(ws, message) {
     case 'resume_session': {
       const session = getSession(sessionId);
       if (!session) {
+        console.warn(`[Session] Resume failed: session ${sessionId} not found`);
         send(ws, { type: 'error', error: 'Session not found' });
         return;
       }
+      console.log(`[Session] Resuming session ${session.id}`);
       clients.set(session.id, ws);
       send(ws, { type: 'session_resumed', session });
       break;
@@ -226,6 +217,7 @@ async function handleMessage(ws, message) {
       }
 
       const { content, model } = payload;
+      console.log(`[Chat] Message from session ${sessionId}: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`);
 
       addToHistory(sessionId, { role: 'user', content });
       send(ws, { type: 'user_message', content });
@@ -242,31 +234,31 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
         messages,
         (chunk) => {
           fullResponse += chunk;
-          send(ws, { type: 'token', content: chunk });
+          send(sessionId, { type: 'token', content: chunk });
         },
         async (toolCall) => {
           if (toolCall.status === 'start') {
-            send(ws, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
+            send(sessionId, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
           } else if (toolCall.status === 'complete') {
             // Tool call streaming complete - waiting for execution
           } else if (toolCall.status === 'result') {
             // Tool execution result from llm.js
-            send(ws, { type: 'tool_result', tool: toolCall.name, result: toolCall.result });
+            send(sessionId, { type: 'tool_result', tool: toolCall.name, result: toolCall.result });
           }
         },
         async (toolName, args) => {
           const requestPermission = async (reason) => {
             const requestId = Math.random().toString(36).substring(7);
-            send(ws, { type: 'permission_request', requestId, tool: toolName, args, reason });
+            send(sessionId, { type: 'permission_request', requestId, tool: toolName, args, reason });
             return new Promise((resolve) => {
               pendingPermissions.set(requestId, resolve);
             });
           };
           return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
         },
-        (raw) => send(ws, { type: 'debug', data: raw }),
-        () => send(ws, { type: 'thinking_start' }),
-        (chunk) => send(ws, { type: 'reasoning', content: chunk }),
+        (raw) => send(sessionId, { type: 'debug', data: raw }),
+        () => send(sessionId, { type: 'thinking_start' }),
+        (chunk) => send(sessionId, { type: 'reasoning', content: chunk }),
         model
       );
 
@@ -276,27 +268,27 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
       try {
         const { dirty } = await gitStatus(session.localPath);
         if (dirty) {
-          send(ws, { type: 'status', status: 'working', message: 'Committing changes...' });
+          send(sessionId, { type: 'status', status: 'working', message: 'Committing changes...' });
           await gitCommit(session.localPath, `Pocket: ${session.task}`);
 
           if (!session.isLocal) {
-            send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
+            send(sessionId, { type: 'status', status: 'working', message: 'Pushing changes...' });
             await gitPush(session.localPath, session.branchName, session.githubToken);
-            send(ws, { type: 'status', status: 'working', message: 'Creating pull request...' });
+            send(sessionId, { type: 'status', status: 'working', message: 'Creating pull request...' });
             const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`, session.githubToken);
             prUrl = prResult.prUrl;
             if (prUrl) {
               updateSession(sessionId, { prUrl });
             }
           } else {
-            send(ws, { type: 'status', status: 'working', message: 'Changes committed locally.' });
+            send(sessionId, { type: 'status', status: 'working', message: 'Changes committed locally.' });
           }
         }
       } catch (error) {
         console.error('Auto-push/PR/Commit failed:', error.message);
       }
 
-      send(ws, { type: 'status', status: 'ready', message: 'Ready for more!', prUrl });
+      send(sessionId, { type: 'status', status: 'ready', message: 'Ready for more!', prUrl });
       break;
     }
 
@@ -437,9 +429,20 @@ async function executeTool(localPath, toolName, args, requestPermission, githubT
   }
 }
 
-function send(ws, data) {
-  if (ws.readyState === 1) {
+function send(wsOrSessionId, data) {
+  let ws;
+  if (typeof wsOrSessionId === 'string') {
+    ws = clients.get(wsOrSessionId);
+  } else {
+    ws = wsOrSessionId;
+  }
+
+  if (ws && ws.readyState === 1) {
     ws.send(JSON.stringify(data));
+  } else if (typeof wsOrSessionId === 'string') {
+    // Session is active but client is disconnected.
+    // The data is already saved to history in handleMessage (for 'assistant' role).
+    // We don't need to do anything here as the client will see history on resume.
   }
 }
 
