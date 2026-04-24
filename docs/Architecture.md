@@ -120,6 +120,12 @@ Server → Client: `session_created`, `session_resumed`, `sessions_list`, `statu
 }
 ```
 
+### Persistence & Background Execution
+Pocket supports long-lived processes. Unlike typical chat applications where the process might stop if the connection is lost, Pocket's agent continues to execute tasks on the server.
+- **WebSocket Disconnect**: Closing the browser tab does *not* delete the session workspace or stop the agent.
+- **Message Routing**: The backend tracks active sessions and routes LLM updates to the most recently connected client for that session.
+- **History Sync**: When a client resumes a session, they receive the full chat history, including any work the agent completed while the client was away.
+
 ## Authentication
 
 Pocket supports automated GitHub authentication via Personal Access Tokens (PATs).
