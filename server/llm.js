@@ -1,6 +1,6 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-const DEFAULT_MODEL = 'nvidia/nemotron-3-super-120b-a12b:free';
+const DEFAULT_MODEL = 'stepfun/step-3.5-flash';
 
 const SYSTEM_PROMPT = `You are Pocket, an autonomous coding agent.
 
@@ -134,6 +134,7 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
 
   async function makeRequest(reqMessages) {
     if (onStartTurn) onStartTurn();
+    console.log(`[LLM] Making request to ${model}...`);
     const response = await fetch(`${OPENROUTER_BASE_URL}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -153,6 +154,7 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
 
     if (!response.ok) {
       const error = await response.text();
+      console.error(`[LLM] Error: ${response.status} - ${error}`);
       throw new Error(`OpenRouter error: ${response.status} - ${error}`);
     }
 
@@ -170,7 +172,7 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\\n');
+      const lines = buffer.split('\n');
       buffer = lines.pop() || '';
 
       for (const line of lines) {
@@ -246,7 +248,9 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
     }
 
     if (toolCall) {
+      console.log(`[Tool] Executing ${toolCall}...`);
       const toolResult = await executeTool(toolCall, JSON.parse(toolArgs || '{}'));
+      console.log(`[Tool] ${toolCall} completed.`);
       onToolCall({
         name: toolCall,
         arguments: JSON.parse(toolArgs || '{}'),

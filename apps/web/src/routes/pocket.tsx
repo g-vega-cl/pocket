@@ -45,7 +45,7 @@ export function PocketApp() {
   const [githubToken, setGithubToken] = useState('');
   const [inputValue, setInputValue] = useState('');
   const [sessionIdInput, setSessionIdInput] = useState('');
-  const [selectedModel, setSelectedModel] = useState('openrouter/elephant-alpha');
+  const [selectedModel, setSelectedModel] = useState('stepfun/step-3.5-flash');
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -184,6 +184,7 @@ export function PocketApp() {
               Start Session
             </button>
             <button
+              id="start-local-session"
               onClick={handleStartLocal}
               disabled={!task || isLoading}
               className="flex-1 px-6 py-3 bg-green-600 text-white rounded-lg font-medium hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
