@@ -11,7 +11,7 @@ export type SessionStatus =
   | 'error';
 
 export interface Message {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   reasoning?: string;
 }
@@ -49,6 +49,7 @@ interface PocketState {
   isLoading: boolean;
   isThinking: boolean;
   currentToolCall: ToolCall | null;
+  toolLogs: Record<string, string>;
   prUrl: string | null;
   error: string | null;
   notification: string | null;
@@ -87,6 +88,7 @@ export function usePocket(wsUrl: string) {
     isLoading: false,
     isThinking: false,
     currentToolCall: null,
+    toolLogs: {},
     prUrl: null,
     error: null,
     notification: null,
@@ -109,7 +111,8 @@ export function usePocket(wsUrl: string) {
 
     ws.onclose = () => {
       setState((prev) => ({ ...prev, connected: false }));
-      reconnectTimeoutRef.current = setTimeout(connect, 3000);
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = setTimeout(connect, 1000); // Faster reconnect
     };
 
     ws.onerror = () => {
@@ -260,10 +263,11 @@ export function usePocket(wsUrl: string) {
           messages: [
             ...prev.messages,
             {
-              role: 'system' as const,
-              content: `Tool ${msg.tool} result: ${JSON.stringify(msg.result)}`,
+              role: 'tool' as const,
+              content: JSON.stringify(msg.result),
             },
           ],
+          isLoading: false,
         }));
         break;
 
@@ -429,7 +433,18 @@ export function usePocket(wsUrl: string) {
   useEffect(() => {
     if (!wsUrl) return;
     connect();
-    return () => disconnect();
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        connect();
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      disconnect();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [connect, disconnect, wsUrl]);
 
   return {
@@ -444,6 +459,10 @@ export function usePocket(wsUrl: string) {
     sendMessage,
     commit,
     createPR,
+    preSetup: (sessionId: string) => {
+      setState((prev) => ({ ...prev, isLoading: true }));
+      send({ type: 'pre_setup', sessionId });
+    },
     disconnect,
   };
 }
