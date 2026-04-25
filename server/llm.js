@@ -192,10 +192,11 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
             onChunk(delta.content);
           }
 
-          const reasoning = delta?.reasoning || delta?.reasoning_content;
-          if (reasoning && typeof reasoning === 'string' && onReasoning) {
-            onReasoning(reasoning);
+          if (delta?.reasoning_content || delta?.reasoning) {
+            const r = delta?.reasoning_content || delta?.reasoning;
+            onReasoning(r);
           }
+
 
           if (delta?.tool_calls && delta.tool_calls.length > 0) {
             const toolCallDelta = delta.tool_calls[0];
@@ -226,6 +227,7 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
           if (finishReason === 'tool_calls') {
             if (currentToolCall) {
               onToolCall({
+                id: currentToolCallId,
                 name: currentToolCall,
                 arguments: JSON.parse(currentToolArgs || '{}'),
                 status: 'complete',
@@ -252,6 +254,7 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
       const toolResult = await executeTool(toolCall, JSON.parse(toolArgs || '{}'));
       console.log(`[Tool] ${toolCall} completed.`);
       onToolCall({
+        id: toolCallId,
         name: toolCall,
         arguments: JSON.parse(toolArgs || '{}'),
         result: toolResult,

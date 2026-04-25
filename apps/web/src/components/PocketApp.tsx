@@ -20,6 +20,7 @@ export function PocketApp() {
     isLoading,
     isThinking,
     currentToolCall,
+    toolLogs,
     error,
     prUrl,
     notification,
@@ -32,6 +33,7 @@ export function PocketApp() {
     sendMessage,
     commit,
     createPR,
+    preSetup,
     pendingPermission,
   } = usePocket(wsUrl);
 
@@ -345,6 +347,15 @@ export function PocketApp() {
               {session.status === 'creating_branch' ? 'Creating...' : 'Create Branch'}
             </button>
           )}
+          {session && session.branchName && (
+             <button
+              onClick={() => preSetup(session.id)}
+              disabled={isLoading}
+              className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+            >
+              Pre-setup
+            </button>
+          )}
         </div>
 
         {error && (
@@ -392,9 +403,50 @@ export function PocketApp() {
             </div>
           )}
 
-          {messages.map((msg, i) => (
+          {messages.map((msg, i) => {
+            if (msg.role === 'tool') {
+              return (
+                <div key={i} className="flex justify-start opacity-60 hover:opacity-100 transition-opacity">
+                  <div className="max-w-[90%] w-full rounded-xl px-4 py-1 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-xs">
+                    <details>
+                      <summary className="cursor-pointer font-mono py-1 flex justify-between items-center">
+                        <span>Tool Result</span>
+                        {msg.timestamp && (
+                          <span className="text-[10px] text-gray-400">
+                            {new Date(msg.timestamp).toLocaleString('sv-SE', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            }).replace('-', '/').replace('-', '/')}
+                          </span>
+                        )}
+                      </summary>
+                      <pre className="p-2 bg-black/5 rounded overflow-x-auto max-h-40 overflow-y-auto mt-1 font-mono">
+                        {msg.content}
+                      </pre>
+                    </details>
+                  </div>
+                </div>
+              );
+            }
+            return (
+            <div key={i} className="space-y-1">
+              <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {msg.timestamp && (
+                  <span className="text-[10px] text-gray-400 px-2">
+                    {new Date(msg.timestamp).toLocaleString('sv-SE', {
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }).replace('-', '/').replace('-', '/')}
+                  </span>
+                )}
+              </div>
             <div
-              key={i}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
@@ -415,22 +467,35 @@ export function PocketApp() {
                 <pre className="whitespace-pre-wrap font-sans text-sm">{msg.content}</pre>
               </div>
             </div>
-          ))}
+            </div>
+          );})}
 
           {currentToolCall && (
             <div className="flex justify-start">
-              <div className="max-w-[80%] rounded-xl px-4 py-2 bg-yellow-100 dark:bg-yellow-900">
-                <p className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                  Tool: {currentToolCall.name}
-                </p>
-                <pre className="text-xs mt-1 text-yellow-700 dark:text-yellow-300 font-mono">
-                  {JSON.stringify(currentToolCall.args, null, 2)}
-                </pre>
+              <div className="max-w-[90%] w-full rounded-xl px-4 py-2 bg-yellow-50 dark:bg-yellow-900/30 border border-yellow-200 dark:border-yellow-800">
+                <div className="flex items-center gap-2 mb-2">
+                  {!currentToolCall.result && (
+                    <div className="animate-spin w-3 h-3 border-2 border-yellow-600 border-t-transparent rounded-full" />
+                  )}
+                  <p className="text-sm font-bold text-yellow-800 dark:text-yellow-200">
+                    Tool: {currentToolCall.name} {currentToolCall.result ? '(Completed)' : '(Running...)'}
+                  </p>
+                </div>
+                <details className="mb-2">
+                  <summary className="text-xs text-yellow-700 dark:text-yellow-400 cursor-pointer hover:underline">
+                    Arguments
+                  </summary>
+                  <pre className="text-xs mt-1 p-2 bg-black/5 rounded text-yellow-700 dark:text-yellow-300 font-mono overflow-x-auto">
+                    {JSON.stringify(currentToolCall.args, null, 2)}
+                  </pre>
+                </details>
                 {currentToolCall.result && (
-                  <div className="mt-2 pt-2 border-t border-yellow-300">
-                    <p className="text-xs font-medium">Result:</p>
-                    <pre className="text-xs mt-1 font-mono overflow-x-auto">
-                      {JSON.stringify(currentToolCall.result, null, 2)}
+                  <div className="mt-2 pt-2 border-t border-yellow-200 dark:border-yellow-800">
+                    <p className="text-xs font-bold text-yellow-800 dark:text-yellow-200 mb-1">Result:</p>
+                    <pre className="text-xs p-2 bg-black/5 rounded font-mono overflow-x-auto max-h-60 overflow-y-auto">
+                      {typeof currentToolCall.result === 'string'
+                        ? currentToolCall.result
+                        : JSON.stringify(currentToolCall.result, null, 2)}
                     </pre>
                   </div>
                 )}
@@ -516,6 +581,17 @@ export function PocketApp() {
 
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
+      {!connected && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
+          <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-xl text-center max-w-sm mx-4">
+            <div className="animate-spin w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4" />
+            <h2 className="text-xl font-bold mb-2">Connecting to Server</h2>
+            <p className="text-gray-600 dark:text-gray-400">
+              Please wait while we re-establish the connection...
+            </p>
+          </div>
+        </div>
+      )}
       <div className="px-4">
         <div className="mb-6">
           <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Pocket</h1>

@@ -118,10 +118,11 @@ describe('Session Management', () => {
       });
 
       expect(updated.history).toHaveLength(1);
-      expect(updated.history[0]).toEqual({
+      expect(updated.history[0]).toMatchObject({
         role: 'user',
         content: 'Hello agent',
       });
+      expect(updated.history[0].timestamp).toBeDefined();
     });
 
     it('should append to existing history', () => {

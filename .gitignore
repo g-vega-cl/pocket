@@ -50,3 +50,4 @@ credentials.json
 
 # LLM
 .qwen
+server/sessions/*.json

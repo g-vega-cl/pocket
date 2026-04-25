@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createSession, getSession, getAllSessions, updateSession, addToHistory } from './sessions.js';
+import { createSession, getSession, getAllSessions, updateSession, addToHistory, updateLastHistoryMessage, loadSessionsFromDisk } from './sessions.js';
 import { gitClone, gitInit, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
 import { readFile, writeFile } from './tools/file.js';
 import { runCommand } from './tools/command.js';
@@ -204,6 +204,7 @@ async function handleMessage(ws, message) {
       break;
     }
 
+    case 'pre_setup':
     case 'chat': {
       const session = getSession(sessionId);
       if (!session) {
@@ -216,7 +217,12 @@ async function handleMessage(ws, message) {
         return;
       }
 
-      const { content, model } = payload;
+      let { content, model } = payload || {};
+
+      if (type === 'pre_setup') {
+        content = "Please explore the repository, try to build it, and run tests. Report on what you find and if everything is working as expected.";
+      }
+
       console.log(`[Chat] Message from session ${sessionId}: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`);
 
       addToHistory(sessionId, { role: 'user', content });
@@ -225,25 +231,52 @@ async function handleMessage(ws, message) {
 const repoName = session.repoUrl.split('/').pop().replace('.git', '');
       const messages = [
         buildSystemMessage(session.branchName, session.task, repoName, session.localPath),
-        ...session.history.map(m => ({ role: m.role, content: m.content })),
+        ...session.history.map(m => {
+          const msg = { role: m.role, content: m.content };
+          if (m.tool_calls) msg.tool_calls = m.tool_calls;
+          if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+          return msg;
+        }),
       ];
 
       let fullResponse = '';
+      let fullReasoning = '';
+
+      addToHistory(sessionId, { role: 'assistant', content: '', reasoning: '' });
 
       await streamChat(
         messages,
         (chunk) => {
           fullResponse += chunk;
+          updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
           send(sessionId, { type: 'token', content: chunk });
         },
         async (toolCall) => {
           if (toolCall.status === 'start') {
+            updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments }, isThinking: false });
             send(sessionId, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
           } else if (toolCall.status === 'complete') {
-            // Tool call streaming complete - waiting for execution
+            // Tool call streaming complete - update history with tool_calls
+            updateLastHistoryMessage(sessionId, fullResponse, fullReasoning, [
+               {
+                 id: toolCall.id || `call_${Date.now()}`,
+                 type: 'function',
+                 function: { name: toolCall.name, arguments: JSON.stringify(toolCall.arguments) }
+               }
+            ]);
           } else if (toolCall.status === 'result') {
+            updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments, result: toolCall.result }, isThinking: true });
             // Tool execution result from llm.js
             send(sessionId, { type: 'tool_result', tool: toolCall.name, result: toolCall.result });
+            // SAVE TOOL RESULT TO HISTORY
+            addToHistory(sessionId, {
+              role: 'tool',
+              content: JSON.stringify(toolCall.result),
+              tool_call: toolCall.name,
+              tool_args: toolCall.arguments,
+              tool_result: toolCall.result,
+              tool_call_id: toolCall.id || `call_${Date.now()}`
+            });
           }
         },
         async (toolName, args) => {
@@ -257,12 +290,19 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
           return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
         },
         (raw) => send(sessionId, { type: 'debug', data: raw }),
-        () => send(sessionId, { type: 'thinking_start' }),
-        (chunk) => send(sessionId, { type: 'reasoning', content: chunk }),
+        () => {
+           updateSession(sessionId, { isThinking: true });
+           send(sessionId, { type: 'thinking_start' });
+        },
+        (chunk) => {
+          fullReasoning += chunk;
+          updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
+          send(sessionId, { type: 'reasoning', content: chunk });
+        },
         model
       );
 
-      addToHistory(sessionId, { role: 'assistant', content: fullResponse });
+      updateSession(sessionId, { isThinking: false, currentToolCall: null });
 
       let prUrl = null;
       try {
@@ -373,32 +413,32 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
 async function executeTool(localPath, toolName, args, requestPermission, githubToken = null, branchName = null) {
   const isPathOutside = (targetPath) => {
     if (!targetPath) return false;
-    const absoluteTarget = path.isAbsolute(targetPath) ? targetPath : path.join(localPath, targetPath);
-    const relative = path.relative(localPath, absoluteTarget);
-    return relative.startsWith('..') || path.isAbsolute(relative);
+    const absoluteLocalPath = path.resolve(localPath);
+    const absoluteTarget = path.resolve(localPath, targetPath);
+    return !absoluteTarget.startsWith(absoluteLocalPath);
   };
 
   switch (toolName) {
     case 'read_file':
+      if (isPathOutside(args.path)) {
+        return { error: `Permission denied: Accessing file outside of sandbox is not allowed: ${args.path}` };
+      }
       return readFile(localPath, args.path);
 
     case 'write_file': {
       if (isPathOutside(args.path)) {
-        const granted = await requestPermission(`Action attempts to write file outside of temporary folder: ${args.path}`);
-        if (!granted) return { error: 'Permission denied' };
+        return { error: `Permission denied: Writing file outside of sandbox is not allowed: ${args.path}` };
       }
       return writeFile(localPath, args.path, args.content);
     }
 
     case 'run_command': {
       const command = args.command || '';
-      const destructiveKeywords = ['rm ', 'mv ', 'chmod ', 'chown '];
-      const isDestructive = destructiveKeywords.some(kw => command.includes(kw));
-      const targetsOutside = command.includes('..') || command.includes(' /');
+      // Block commands that attempt to escape the sandbox
+      const targetsOutside = command.includes('..') || command.includes(' /') || command.startsWith('/');
 
-      if (isDestructive || targetsOutside) {
-        const granted = await requestPermission(`Action attempts to run a potentially destructive command or access outside of temporary folder: ${command}`);
-        if (!granted) return { error: 'Permission denied' };
+      if (targetsOutside) {
+         return { error: `Permission denied: Command attempts to access outside of sandbox: ${command}` };
       }
       return runCommand(localPath, command);
     }
@@ -471,6 +511,8 @@ app.post('/api/clone', async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 });
+
+loadSessionsFromDisk();
 
 server.listen(PORT, () => {
   console.log(`Pocket server running on port ${PORT}`);
