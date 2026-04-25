@@ -37,14 +37,30 @@ If using a Cloudflare Tunnel (e.g., `bolt.clvg.uk`):
 2. Enter task description
 3. (Optional) Provide a GitHub Token override if your global token is expired or you need different permissions
 4. Clone → Create Branch
-4. Chat with agent
-5. PR created to `pocket` branch
+5. Chat with agent
+6. PR created to `pocket` branch
+
+### Architecture
+
+Pocket uses a **polling-based** architecture for real-time updates:
+- Client polls server every 5 seconds for session updates
+- No WebSocket or SSE - simpler and more reliable for background tasks
+- Session state is persisted to disk and survives server restarts
+
+### Debugging
+
+Enable debug logging to see LLM interactions:
+- Server logs show `[LLM] Delta:` and `[LLM] Complete:` messages
+- These appear in the server console and are sent to the client as `type: 'debug'` messages
+- Use debug logs to diagnose issues with LLM responses or tool calls
+
+See [LLM Debugging Guide](docs/LLM-DEBUGGING.md) for detailed troubleshooting.
 
 ## Test
 
 ```bash
 cd server && pnpm test          # Server (75 tests)
-cd apps/web && pnpm test        # Web (21 tests)
+cd apps/web && pnpm test        # Web (8 tests)
 ```
 
 ## Docs

@@ -86,13 +86,7 @@ type ServerMessage =
       branchName?: string
     }
   | { type: 'user_message'; content: string }
-  | { type: 'thinking_start' }
-  | { type: 'reasoning'; content: string }
-  | { type: 'token'; content: string }
-  | { type: 'tool_start'; tool: string; args: Record<string, unknown> }
   | { type: 'tool_result'; tool: string; result: unknown }
-  | { type: 'done'; prUrl?: string | null }
-  | { type: 'debug'; data: unknown }
   | { type: 'error'; error: string }
   | {
       type: 'permission_request'
@@ -379,75 +373,6 @@ export function usePocket(wsUrl: string) {
         }))
         break
 
-      case 'thinking_start':
-        setState((prev) => ({
-          ...prev,
-          isThinking: true,
-        }))
-        break
-
-      case 'reasoning':
-        setState((prev) => {
-          if (prev.messages.length > 0) {
-            const lastMsg = prev.messages[prev.messages.length - 1]
-            if (lastMsg.role === 'assistant') {
-              return {
-                ...prev,
-                isThinking: false,
-                messages: [
-                  ...prev.messages.slice(0, -1),
-                  {
-                    ...lastMsg,
-                    reasoning: (lastMsg.reasoning || '') + msg.content,
-                  },
-                ],
-              }
-            }
-          }
-          return {
-            ...prev,
-            isThinking: false,
-            messages: [
-              ...prev.messages,
-              { role: 'assistant', content: '', reasoning: msg.content },
-            ],
-          }
-        })
-        break
-
-      case 'token':
-        setState((prev) => {
-          if (prev.messages.length > 0) {
-            const lastMsg = prev.messages[prev.messages.length - 1]
-            if (lastMsg.role === 'assistant') {
-              return {
-                ...prev,
-                isThinking: false,
-                messages: [
-                  ...prev.messages.slice(0, -1),
-                  { ...lastMsg, content: lastMsg.content + msg.content },
-                ],
-              }
-            }
-          }
-          return {
-            ...prev,
-            isThinking: false,
-            messages: [
-              ...prev.messages,
-              { role: 'assistant', content: msg.content },
-            ],
-          }
-        })
-        break
-
-      case 'tool_start':
-        setState((prev) => ({
-          ...prev,
-          currentToolCall: { name: msg.tool, args: msg.args },
-        }))
-        break
-
       case 'tool_result':
         setState((prev) => ({
           ...prev,
@@ -463,20 +388,6 @@ export function usePocket(wsUrl: string) {
           ],
           isLoading: false,
         }))
-        break
-
-      case 'done':
-        setState((prev) => ({
-          ...prev,
-          isLoading: false,
-          isThinking: false,
-          currentToolCall: null,
-          prUrl: msg.prUrl ?? prev.prUrl,
-          session: prev.session ? { ...prev.session, status: 'done' } : null,
-        }))
-        break
-
-      case 'debug':
         break
 
       case 'error':

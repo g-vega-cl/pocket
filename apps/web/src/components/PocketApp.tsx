@@ -539,7 +539,7 @@ export function PocketApp() {
                           : 'bg-gray-100 dark:bg-gray-700'
                     }`}
                   >
-                    {msg.role === 'assistant' && msg.reasoning && (
+                    {msg.role === 'assistant' && msg.reasoning && msg.reasoning !== 'undefined' && (
                       <div className="mb-2 pb-2 border-b border-gray-300 dark:border-gray-600">
                         <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
                           Thinking

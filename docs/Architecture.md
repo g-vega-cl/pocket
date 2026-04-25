@@ -36,9 +36,11 @@ The app uses TanStack Start with SSR. To prevent hydration mismatches:
 
 ## Backend
 
-`server/index.js` - WebSocket + Express server
-`server/sessions.js` - In-memory session store
+`server/index.js` - Express server (polling-based)
+`server/sessions.js` - In-memory session store with disk persistence
 `server/llm.js` - OpenRouter client
+
+**Note**: Pocket uses a polling-based architecture for real-time updates (see [POLLING-MIGRATION.md](POLLING-MIGRATION.md) for details). No WebSocket or SSE connections are used.
 
 ### LLM Client (llm.js)
 
@@ -77,6 +79,16 @@ buildSystemMessage(
 )
 ```
 
+**System Prompt Structure**:
+- **Interaction Rules**: Defines when to use tools vs. respond naturally
+- **Available Tools**: Lists all available tools with descriptions
+- **Repository Context**: Includes repo name, branch, task, and local path
+
+**Important**: The system prompt includes explicit rules to prevent infinite tool-call loops:
+1. Greetings/conversation: Respond naturally without using tools
+2. Repository questions: Explore using tools ONCE, then answer based on results
+3. Do NOT loop - after exploring, answer the user's question directly
+
 ## Tools
 
 | Tool | File | Description |
@@ -97,29 +109,64 @@ Repositories are cloned to `{os.tmpdir()}/pocket` (e.g., `/tmp/pocket` on Linux,
 - **Cross-platform**: Uses `os.tmpdir()` automatically
 - **Automatic cleanup**: Directories older than 7 days are removed on server startup
 
-## WebSocket Protocol
+## API Protocol
 
-Client → Server: `create_session`, `resume_session`, `list_sessions`, `clone`, `create_branch`, `chat`, `commit`, `create_pr`
-Server → Client: `session_created`, `session_resumed`, `sessions_list`, `status`, `thinking_start`, `reasoning`, `token`, `tool_start`, `tool_result`, `debug`, `error`
+Pocket uses a polling-based architecture with REST API for real-time updates.
 
-**Note**: `status` messages include a `message` field for feedback (e.g., "Committed and pushed!", "PR created!"). `debug` messages contain raw LLM response data for debugging.
+### Client → Server (REST API)
+- `POST /api/sessions` - Create new session
+- `POST /api/sessions/local` - Create local session
+- `GET /api/sessions/:sessionId` - Get session state (polling endpoint)
+- `POST /api/sessions/:sessionId/clone` - Clone repository
+- `POST /api/sessions/:sessionId/create_branch` - Create branch
+- `POST /api/sessions/:sessionId/chat` - Send message to agent
+- `POST /api/sessions/:sessionId/commit` - Commit changes
+- `POST /api/sessions/:sessionId/create_pr` - Create pull request
+- `POST /api/sessions/:sessionId/permission` - Respond to permission request
 
-**Loading State**: The frontend derives `isLoading` from status messages. When status is `cloning`, `creating_branch`, or `working`, the UI shows a loading indicator. Terminal states (`ready`, `done`, `error`) clear the loading indicator.
+### Server → Client (Polling Response)
+The `/api/sessions/:sessionId` endpoint returns the full session state:
+- `session_created` - New session created
+- `session_resumed` - Session loaded from disk
+- `session_data` - Session state update
+- `sessions_list` - List of all sessions
+- `status` - Session status change (includes `message` field for feedback)
+- `user_message` - User message added to history
+- `tool_result` - Tool execution result
+- `error` - Error message
+- `permission_request` - Permission request for tool execution
+- `aborted` - Session aborted
 
-**Error Handling**: 
-- **HTTP Errors**: API requests (e.g., `/api/sessions/:id/chat`) that return non-2xx status codes are caught and displayed with the status code and error message (e.g., `Error 429: Too Many Requests`)
+### Debug Messages
+Server sends `debug` messages with raw LLM response data for debugging:
+- `llm_delta` - Raw delta from LLM stream
+- `llm_complete` - Completion details after each turn
+
+### Loading State
+The frontend derives `isLoading` from status messages. When status is `cloning`, `creating_branch`, or `working`, the UI shows a loading indicator. Terminal states (`ready`, `done`, `error`) clear the loading indicator.
+
+### Error Handling
+- **HTTP Errors**: API requests that return non-2xx status codes are caught and displayed with the status code and error message (e.g., `Error 429: Too Many Requests`)
 - **Network Errors**: Failed network requests are caught and displayed with the error message
-- **WebSocket Errors**: Server-sent `error` messages are displayed in the UI with the error text
+- **Server Errors**: Server-sent `error` messages are displayed in the UI with the error text
 
-**Background Sync**: Pocket uses a combination of Server-Sent Events (SSE) and periodic polling to ensure you always see the latest status:
-- **SSE**: Real-time updates from the server
-- **Polling**: Every 10 seconds when a session is active, fetches latest status via REST API
+### Background Sync
+Pocket uses polling to ensure you always see the latest status:
+- **Polling Interval**: Every 5 seconds (5000ms) when a session is active
+- **Endpoint**: `GET /api/sessions/:sessionId`
+- **Response**: Full session state including history, status, and metadata
 - **On visibility change**: When returning to the tab, immediately fetches latest status
 - **Visual indicator**: Shows "Syncing" spinner + last sync time
 
-This ensures you never see a "stuck" state - even if SSE events are missed, polling catches up automatically.
+This ensures you always see the latest state without complex real-time infrastructure.
 
-**Thinking Flow**: When a `chat` message is sent, the server emits `thinking_start` before the first OpenRouter request. If the model supports reasoning, `reasoning` chunks stream in real time. Once content tokens arrive (`token`), the frontend switches from the generic "Thinking..." indicator to displaying the actual response.
+### Thinking Flow
+When a `chat` message is sent:
+1. User message is added to history
+2. Server processes the message via `streamChat()`
+3. LLM may make tool calls or generate text
+4. After completion, session history is updated and persisted
+5. Client sees updated history on next poll (within 5 seconds)
 
 ## Session
 

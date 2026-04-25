@@ -231,9 +231,11 @@ async function processChat(sessionId, content, model) {
 
       },
       (chunk) => {
-        fullReasoning += chunk;
-        updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
-
+        // Defensive coding: only append valid string values
+        if (chunk !== undefined && chunk !== null && chunk !== '') {
+          fullReasoning += chunk;
+          updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
+        }
       },
       model
     );

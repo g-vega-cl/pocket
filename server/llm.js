@@ -9,15 +9,15 @@ You're on branch: {branchName}
 
 Your task: {taskDescription}
 
-CRITICAL RULE: When asked about the repository or its contents, you MUST call run_command("ls -la") and read_file("README.md") FIRST before answering. Do not describe the repo from memory - you must explore it using these tools.
+# Interaction Rules
+1. For greetings/conversation: Respond naturally without using tools
+2. For repository questions: Explore using tools ONCE, then answer based on results
+3. Do NOT loop - after exploring, answer the user's question directly
+4. Read files to understand the codebase before making changes
+5. Make necessary changes, run tests with run_command
+6. When done: git_commit → git_push → github_create_pr
 
-Rules:
-- Read files to understand the codebase
-- Make necessary changes
-- Run tests with run_command
-- When done: git_commit → git_push → github_create_pr
-
-AVAILABLE TOOLS:
+# Available Tools
 - read_file(path) - Read a file, returns content (use absolute path: {localPath}/<path>)
 - write_file(path, content) - Write/modify a file
 - run_command(cmd) - Execute a shell command
@@ -187,6 +187,23 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
 
           if (onRaw) onRaw(parsed);
 
+          // DEBUG: Log delta structure to both server console and client
+          if (delta?.content || delta?.tool_calls) {
+            const logMsg = {
+              type: 'debug',
+              data: {
+                source: 'llm_delta',
+                hasContent: !!delta.content,
+                hasToolCalls: !!delta.tool_calls,
+                contentLength: delta.content?.length || 0,
+                toolCallsCount: delta.tool_calls?.length || 0,
+                finishReason: finishReason
+              }
+            };
+            console.log('[LLM] Delta:', logMsg.data);
+            if (onRaw) onRaw(logMsg);
+          }
+
           if (delta?.content && typeof delta.content === 'string' && delta.content) {
             assistantMessage += delta.content;
             onChunk(delta.content);
@@ -194,7 +211,10 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
 
           if (delta?.reasoning_content || delta?.reasoning) {
             const r = delta?.reasoning_content || delta?.reasoning;
-            onReasoning(r);
+            // Defensive coding: only call onReasoning with valid string values
+            if (r !== undefined && r !== null && r !== '') {
+              onReasoning(r);
+            }
           }
 
 
@@ -244,6 +264,20 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
 
   while (true) {
     const { finishReason, assistantMessage, toolCall, toolArgs, toolCallId } = await makeRequest(allMessages);
+
+    // DEBUG: Log what the LLM returned
+    const debugMsg = {
+      type: 'debug',
+      data: {
+        source: 'llm_complete',
+        finishReason,
+        assistantMessageLength: assistantMessage.length,
+        hasToolCall: !!toolCall,
+        toolCallName: toolCall || null
+      }
+    };
+    console.log('[LLM] Complete:', debugMsg.data);
+    if (onRaw) onRaw(debugMsg);
 
     if (finishReason !== 'tool_calls') {
       break;

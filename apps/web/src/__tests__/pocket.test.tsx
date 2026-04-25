@@ -44,7 +44,7 @@ describe('PocketApp UI', () => {
       isLoading: false,
       isThinking: false,
       currentToolCall: null,
-      toolLogs: [],
+      toolLogs: {},
       prUrl: null,
       error: null,
       notification: null,

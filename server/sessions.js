@@ -66,7 +66,10 @@ function updateLastHistoryMessage(id, content, reasoning = null, tool_calls = nu
   const last = session.history[session.history.length - 1];
   if (last.role === 'assistant') {
     last.content = content;
-    if (reasoning !== null) last.reasoning = reasoning;
+    // Defensive coding: only update reasoning if it's a valid non-empty string
+    if (reasoning !== null && reasoning !== undefined && reasoning !== '') {
+      last.reasoning = reasoning;
+    }
     if (tool_calls !== null) last.tool_calls = tool_calls;
     session.lastActivity = Date.now();
     saveSessionToDisk(session);
