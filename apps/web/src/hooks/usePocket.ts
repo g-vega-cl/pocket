@@ -98,31 +98,42 @@ export function usePocket(wsUrl: string) {
     pendingPermission: null,
   });
 
-  const wsRef = useRef<WebSocket | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
 
-  const connect = useCallback(() => {
+  const connect = useCallback((sessionId?: string) => {
     if (!wsUrl) return;
-    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (eventSourceRef.current) eventSourceRef.current.close();
 
-    const ws = new WebSocket(wsUrl);
+    // In local dev, wsUrl is typically "ws://localhost:3000/ws" (proxied to 5173)
+    // We want our API calls to go through the same origin to use the proxy
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
 
-    ws.onopen = () => {
+    const eventsUrl = sessionId
+      ? `${baseUrl}/api/sessions/${sessionId}/events`
+      : `${baseUrl}/api/sessions/global/events`;
+
+    const es = new EventSource(eventsUrl);
+
+    es.onopen = () => {
       setState((prev) => ({ ...prev, connected: true, error: null }));
-      ws.send(JSON.stringify({ type: 'list_sessions' }));
+      // Fetch initial data
+      fetchSessions();
+      if (sessionId) {
+        fetchSessionData(sessionId);
+      }
     };
 
-    ws.onclose = () => {
+    es.onerror = (e) => {
+      console.error('SSE Error:', e);
       setState((prev) => ({ ...prev, connected: false }));
+      es.close();
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = setTimeout(connect, 1000); // Faster reconnect
+      reconnectTimeoutRef.current = setTimeout(() => connect(sessionId), 2000);
     };
 
-    ws.onerror = () => {
-      setState((prev) => ({ ...prev, error: 'Connection error' }));
-    };
-
-    ws.onmessage = (event) => {
+    es.onmessage = (event) => {
       try {
         const msg: ServerMessage = JSON.parse(event.data);
         handleServerMessage(msg);
@@ -131,7 +142,35 @@ export function usePocket(wsUrl: string) {
       }
     };
 
-    wsRef.current = ws;
+    eventSourceRef.current = es;
+  }, [wsUrl]);
+
+  const fetchSessions = useCallback(async () => {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+    try {
+      const res = await fetch(`${baseUrl}/api/sessions`);
+      const data = await res.json();
+      if (data.type === 'sessions_list') {
+        setState(prev => ({ ...prev, sessions: data.sessions }));
+      }
+    } catch (e) {
+      console.error('Failed to fetch sessions:', e);
+    }
+  }, [wsUrl]);
+
+  const fetchSessionData = useCallback(async (sessionId: string) => {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+    try {
+      const res = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
+      const data = await res.json();
+      if (data.type === 'session_resumed') {
+        handleServerMessage(data);
+      }
+    } catch (e) {
+      console.error('Failed to fetch session data:', e);
+    }
   }, [wsUrl]);
 
   const handleServerMessage = useCallback((msg: ServerMessage) => {
@@ -139,9 +178,11 @@ export function usePocket(wsUrl: string) {
       case 'session_created':
         setState((prev) => ({
           ...prev,
-          session: { ...prev.session!, id: msg.sessionId } as Session,
+          session: prev.session ? { ...prev.session, id: msg.sessionId } : { id: msg.sessionId } as Session,
           isLoading: false,
         }));
+        // Reconnect to the specific session stream
+        connect(msg.sessionId);
         break;
 
       case 'session_resumed':
@@ -152,6 +193,7 @@ export function usePocket(wsUrl: string) {
           isThinking: msg.session.isThinking ?? false,
           currentToolCall: msg.session.currentToolCall ?? null,
           isLoading: msg.session.status === 'working' || (msg.session.isThinking ?? false) || !!msg.session.currentToolCall,
+          pendingPermission: msg.session.pendingPermission ?? null,
         }));
         break;
 
@@ -324,14 +366,24 @@ export function usePocket(wsUrl: string) {
     }
   }, []);
 
-  const send = useCallback((message: object) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify(message));
+  const post = useCallback(async (path: string, body: object) => {
+    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+    const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+    try {
+      const res = await fetch(`${baseUrl}${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      return await res.json();
+    } catch (e) {
+      console.error(`Post to ${path} failed:`, e);
+      setState(prev => ({ ...prev, error: 'Request failed' }));
     }
-  }, []);
+  }, [wsUrl]);
 
   const createSession = useCallback(
-    (repoUrl: string, task: string, githubToken?: string) => {
+    async (repoUrl: string, task: string, githubToken?: string) => {
       setState((prev) => ({
         ...prev,
         isLoading: true,
@@ -347,25 +399,30 @@ export function usePocket(wsUrl: string) {
         messages: [],
         error: null,
       }));
-      send({ type: 'create_session', payload: { repoUrl, task, githubToken } });
+      const data = await post('/api/sessions', { repoUrl, task, githubToken });
+      if (data?.sessionId) {
+        handleServerMessage(data);
+      }
     },
-    [send]
+    [post, handleServerMessage]
   );
 
   const listSessions = useCallback(() => {
-    send({ type: 'list_sessions' });
-  }, [send]);
+    fetchSessions();
+  }, [fetchSessions]);
 
   const respondToPermission = useCallback(
-    (requestId: string, granted: boolean) => {
-      send({ type: 'permission_response', payload: { requestId, granted } });
+    async (requestId: string, granted: boolean) => {
+      const sessionId = state.session?.id;
+      if (!sessionId) return;
+      await post(`/api/sessions/${sessionId}/permission`, { requestId, granted });
       setState((prev) => ({ ...prev, pendingPermission: null }));
     },
-    [send]
+    [post, state.session?.id]
   );
 
   const createLocalSession = useCallback(
-    (task: string) => {
+    async (task: string) => {
       setState((prev) => ({
         ...prev,
         isLoading: true,
@@ -382,68 +439,78 @@ export function usePocket(wsUrl: string) {
         messages: [],
         error: null,
       }));
-      send({ type: 'create_local_session', payload: { task } });
+      const data = await post('/api/sessions/local', { task });
+      if (data?.sessionId) {
+        handleServerMessage(data);
+      }
     },
-    [send]
+    [post, handleServerMessage]
   );
 
   const resumeSession = useCallback(
     (sessionId: string) => {
       setState((prev) => ({ ...prev, isLoading: true }));
-      send({ type: 'resume_session', sessionId });
+      connect(sessionId);
     },
-    [send]
+    [connect]
   );
 
   const clone = useCallback(
     (sessionId: string) => {
-      send({ type: 'clone', sessionId });
+      post(`/api/sessions/${sessionId}/clone`, {});
     },
-    [send]
+    [post]
   );
 
   const createBranch = useCallback(
     (sessionId: string) => {
-      send({ type: 'create_branch', sessionId });
+      post(`/api/sessions/${sessionId}/create_branch`, {});
     },
-    [send]
+    [post]
   );
 
   const sendMessage = useCallback(
     (sessionId: string, content: string, model?: string) => {
       setState((prev) => ({ ...prev, isLoading: true }));
-      send({ type: 'chat', sessionId, payload: { content, model } });
+      post(`/api/sessions/${sessionId}/chat`, { content, model });
     },
-    [send]
+    [post]
   );
 
   const disconnect = useCallback(() => {
     clearTimeout(reconnectTimeoutRef.current);
-    wsRef.current?.close();
-    wsRef.current = null;
+    eventSourceRef.current?.close();
+    eventSourceRef.current = null;
   }, []);
 
   const commit = useCallback(
     (sessionId: string) => {
-      send({ type: 'commit', sessionId });
+      post(`/api/sessions/${sessionId}/commit`, {});
     },
-    [send]
+    [post]
   );
 
   const createPR = useCallback(
     (sessionId: string) => {
-      send({ type: 'create_pr', sessionId });
+      post(`/api/sessions/${sessionId}/create_pr`, {});
     },
-    [send]
+    [post]
   );
 
   useEffect(() => {
     if (!wsUrl) return;
-    connect();
+
+    // On mount, if we have a session in the URL (handled by parent usually), we connect to it.
+    // Otherwise we connect to global stream.
+    const searchParams = new URLSearchParams(window.location.search);
+    const sessionId = searchParams.get('sessionId');
+
+    connect(sessionId || undefined);
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        connect();
+        const currentSessionId = new URLSearchParams(window.location.search).get('sessionId');
+        connect(currentSessionId || undefined);
       }
     };
 
@@ -468,7 +535,7 @@ export function usePocket(wsUrl: string) {
     createPR,
     preSetup: (sessionId: string) => {
       setState((prev) => ({ ...prev, isLoading: true }));
-      send({ type: 'pre_setup', sessionId });
+      post(`/api/sessions/${sessionId}/chat`, { isPreSetup: true });
     },
     disconnect,
   };
