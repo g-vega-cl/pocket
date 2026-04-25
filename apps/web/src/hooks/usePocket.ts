@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 export type SessionStatus =
   | 'created'
@@ -8,62 +8,63 @@ export type SessionStatus =
   | 'ready'
   | 'working'
   | 'done'
-  | 'error';
+  | 'error'
 
 export interface Message {
-  role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string;
-  reasoning?: string;
-  timestamp?: number;
+  role: 'user' | 'assistant' | 'system' | 'tool'
+  content: string
+  reasoning?: string
+  timestamp?: number
 }
 
 export interface Session {
-  id: string;
-  repoUrl: string;
-  task: string;
-  isLocal?: boolean;
-  localPath: string | null;
-  branchName: string | null;
-  history: Message[];
-  status: SessionStatus;
-  isThinking?: boolean;
-  currentToolCall?: ToolCall | null;
+  id: string
+  repoUrl: string
+  task: string
+  isLocal?: boolean
+  localPath: string | null
+  branchName: string | null
+  history: Message[]
+  status: SessionStatus
+  isThinking?: boolean
+  currentToolCall?: ToolCall | null
 }
 
 export interface ToolCall {
-  name: string;
-  args: Record<string, unknown>;
-  result?: unknown;
+  name: string
+  args: Record<string, unknown>
+  result?: unknown
 }
 
 interface SessionListItem {
-  id: string;
-  repoUrl: string;
-  task: string;
-  createdAt: number;
-  status: SessionStatus;
+  id: string
+  repoUrl: string
+  task: string
+  createdAt: number
+  status: SessionStatus
 }
 
 interface PocketState {
-  connected: boolean;
-  syncing: boolean;
-  lastSyncTime: number | null;
-  session: Session | null;
-  sessions: SessionListItem[];
-  messages: Message[];
-  isLoading: boolean;
-  isThinking: boolean;
-  currentToolCall: ToolCall | null;
-  toolLogs: Record<string, string>;
-  prUrl: string | null;
-  error: string | null;
-  notification: string | null;
+  connected: boolean
+  isConnecting: boolean
+  syncing: boolean
+  lastSyncTime: number | null
+  session: Session | null
+  sessions: SessionListItem[]
+  messages: Message[]
+  isLoading: boolean
+  isThinking: boolean
+  currentToolCall: ToolCall | null
+  toolLogs: Record<string, string>
+  prUrl: string | null
+  error: string | null
+  notification: string | null
   pendingPermission: {
-    requestId: string;
-    tool: string;
-    args: Record<string, unknown>;
-    reason: string;
-  } | null;
+    requestId: string
+    tool: string
+    args: Record<string, unknown>
+    reason: string
+  } | null
 }
 
 type ServerMessage =
@@ -71,7 +72,13 @@ type ServerMessage =
   | { type: 'session_resumed'; session: Session }
   | { type: 'session_data'; session: Session }
   | { type: 'sessions_list'; sessions: SessionListItem[] }
-  | { type: 'status'; status: SessionStatus; message?: string; localPath?: string; branchName?: string }
+  | {
+      type: 'status'
+      status: SessionStatus
+      message?: string
+      localPath?: string
+      branchName?: string
+    }
   | { type: 'user_message'; content: string }
   | { type: 'thinking_start' }
   | { type: 'reasoning'; content: string }
@@ -81,12 +88,19 @@ type ServerMessage =
   | { type: 'done'; prUrl?: string | null }
   | { type: 'debug'; data: unknown }
   | { type: 'error'; error: string }
-  | { type: 'permission_request'; requestId: string; tool: string; args: Record<string, unknown>; reason: string }
-  | { type: 'aborted' };
+  | {
+      type: 'permission_request'
+      requestId: string
+      tool: string
+      args: Record<string, unknown>
+      reason: string
+    }
+  | { type: 'aborted' }
 
 export function usePocket(wsUrl: string) {
   const [state, setState] = useState<PocketState>({
     connected: false,
+    isConnecting: false,
     syncing: false,
     lastSyncTime: null,
     session: null,
@@ -100,174 +114,266 @@ export function usePocket(wsUrl: string) {
     error: null,
     notification: null,
     pendingPermission: null,
-  });
+  })
 
-  const eventSourceRef = useRef<EventSource | null>(null);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
-  const pollIntervalRef = useRef<NodeJS.Timeout>();
-  const syncTimeoutRef = useRef<NodeJS.Timeout>();
-  const currentSessionIdRef = useRef<string | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null)
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
+  const pollIntervalRef = useRef<NodeJS.Timeout>()
+  const syncTimeoutRef = useRef<NodeJS.Timeout>()
+  const currentSessionIdRef = useRef<string | null>(null)
 
-  const fetchSessionsRef = useRef<() => void>(() => {});
-  const fetchSessionDataRef = useRef<(sessionId: string, isPolling?: boolean) => void>(() => {});
-  const startPollingRef = useRef<(sessionId: string, intervalMs?: number) => void>(() => {});
+  const fetchSessionsRef = useRef<() => void>(() => {})
+  const fetchSessionDataRef = useRef<
+    (sessionId: string, isPolling?: boolean) => void
+  >(() => {})
+  const startPollingRef = useRef<
+    (sessionId: string, intervalMs?: number) => void
+  >(() => {})
 
-  const connect = useCallback((sessionId?: string) => {
-    if (!wsUrl) return;
-    if (eventSourceRef.current) eventSourceRef.current.close();
+  const connect = useCallback(
+    (sessionId?: string) => {
+      if (!wsUrl) return
+      if (eventSourceRef.current) eventSourceRef.current.close()
 
-    currentSessionIdRef.current = sessionId || null;
-    console.log('[SSE] Connecting to:', sessionId ? `session ${sessionId}` : 'global stream');
+      currentSessionIdRef.current = sessionId || null
 
-    // In local dev, wsUrl is typically "ws://localhost:3000/ws" (proxied to 5173)
-    // We want our API calls to go through the same origin to use the proxy
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
-
-    const eventsUrl = sessionId
-      ? `${baseUrl}/api/sessions/${sessionId}/events`
-      : `${baseUrl}/api/sessions/global/events`;
-
-    const es = new EventSource(eventsUrl);
-
-    es.onopen = () => {
-      console.log('[SSE] Connected');
-      setState((prev) => ({ ...prev, connected: true, error: null }));
-      // Fetch initial data
-      fetchSessionsRef.current();
-      if (sessionId) {
-        console.log('[SSE] Fetching session data for:', sessionId);
-        fetchSessionDataRef.current(sessionId);
-        startPollingRef.current(sessionId, 10000);
+      // Only connect to SSE if we have a session ID
+      if (!sessionId) {
+        console.log('[SSE] No session ID, using polling for sessions list')
+        // Fetch sessions list via polling when no session is selected
+        fetchSessionsRef.current()
+        setState((prev) => ({ ...prev, isConnecting: false }))
+        return
       }
-    };
 
-    es.onerror = (e) => {
-      console.error('[SSE] Error:', e);
-      setState((prev) => ({ ...prev, connected: false }));
-      es.close();
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = setTimeout(() => connect(sessionId), 2000);
-    };
+      console.log('[SSE] Connecting to session:', sessionId)
+      setState((prev) => ({ ...prev, isConnecting: true }))
 
-    es.onmessage = (event) => {
-      try {
-        const msg: ServerMessage = JSON.parse(event.data);
-        console.log('[SSE] Message received:', msg.type);
-        handleServerMessage(msg);
-      } catch (e) {
-        console.error('[SSE] Failed to parse message:', e);
+      // In local dev, wsUrl is typically "ws://localhost:3000/ws" (proxied to 5173)
+      // We want our API calls to go through the same origin to use the proxy
+      const isLocal =
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1'
+      const baseUrl = isLocal
+        ? ''
+        : wsUrl
+            .replace('ws://', 'http://')
+            .replace('wss://', 'https://')
+            .replace('/ws', '')
+
+      const eventsUrl = `${baseUrl}/api/sessions/${sessionId}/events`
+
+      const es = new EventSource(eventsUrl)
+
+      es.onopen = () => {
+        console.log('[SSE] Connected to session:', sessionId)
+        setState((prev) => ({
+          ...prev,
+          connected: true,
+          isConnecting: false,
+          error: null,
+        }))
+        // Fetch initial data
+        fetchSessionDataRef.current(sessionId)
+        startPollingRef.current(sessionId, 10000)
       }
-    };
 
-    eventSourceRef.current = es;
-  }, [wsUrl]);
+      es.onerror = (e) => {
+        console.error('[SSE] Error:', e)
+        setState((prev) => ({ ...prev, connected: false, isConnecting: false }))
+        es.close()
+        if (reconnectTimeoutRef.current)
+          clearTimeout(reconnectTimeoutRef.current)
+        reconnectTimeoutRef.current = setTimeout(() => connect(sessionId), 2000)
+      }
+
+      es.onmessage = (event) => {
+        try {
+          const msg: ServerMessage = JSON.parse(event.data)
+          console.log('[SSE] Message received:', msg.type)
+          handleServerMessage(msg)
+        } catch (e) {
+          console.error('[SSE] Failed to parse message:', e)
+        }
+      }
+
+      eventSourceRef.current = es
+    },
+    [wsUrl],
+  )
 
   const fetchSessions = useCallback(async () => {
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
+    const isLocal =
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1'
+    const baseUrl = isLocal
+      ? ''
+      : wsUrl
+          .replace('ws://', 'http://')
+          .replace('wss://', 'https://')
+          .replace('/ws', '')
     try {
-      const res = await fetch(`${baseUrl}/api/sessions`);
-      const data = await res.json();
+      const res = await fetch(`${baseUrl}/api/sessions`)
+      if (!res.ok) {
+        let errorText = await res.text()
+        try {
+          const json = JSON.parse(errorText)
+          errorText = json.error || json.message || errorText
+        } catch {
+          // Not JSON, use raw text
+        }
+        const errorMsg = `Error ${res.status}: ${errorText}`
+        console.error(`Failed to fetch sessions:`, errorMsg)
+        setState((prev) => ({ ...prev, error: errorMsg }))
+        return
+      }
+      const data = await res.json()
       if (data.type === 'sessions_list') {
-        setState(prev => ({ ...prev, sessions: data.sessions }));
+        setState((prev) => ({ ...prev, sessions: data.sessions }))
       }
     } catch (e) {
-      console.error('Failed to fetch sessions:', e);
+      const errorMsg = e instanceof Error ? e.message : 'Request failed'
+      console.error('Failed to fetch sessions:', e)
+      setState((prev) => ({ ...prev, error: errorMsg }))
     }
-  }, [wsUrl]);
+  }, [wsUrl])
 
-  const fetchSessionData = useCallback(async (sessionId: string, isPolling = false) => {
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
-    try {
-      if (isPolling) {
-        setState((prev) => ({ ...prev, syncing: true }));
+  const fetchSessionData = useCallback(
+    async (sessionId: string, isPolling = false) => {
+      const isLocal =
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1'
+      const baseUrl = isLocal
+        ? ''
+        : wsUrl
+            .replace('ws://', 'http://')
+            .replace('wss://', 'https://')
+            .replace('/ws', '')
+      try {
+        if (isPolling) {
+          setState((prev) => ({ ...prev, syncing: true }))
+        }
+        const res = await fetch(`${baseUrl}/api/sessions/${sessionId}`)
+        const data = await res.json()
+        console.log(
+          '[Sync] Fetched session data:',
+          data.type,
+          'status:',
+          data.session?.status,
+        )
+        if (data.type === 'session_resumed') {
+          handleServerMessage(data)
+        }
+        setState((prev) => ({
+          ...prev,
+          lastSyncTime: Date.now(),
+          syncing: false,
+        }))
+      } catch (e) {
+        console.error('[Sync] Failed to fetch session data:', e)
+        setState((prev) => ({ ...prev, syncing: false }))
       }
-      const res = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
-      const data = await res.json();
-      console.log('[Sync] Fetched session data:', data.type, 'status:', data.session?.status);
-      if (data.type === 'session_resumed') {
-        handleServerMessage(data);
-      }
-      setState((prev) => ({ ...prev, lastSyncTime: Date.now(), syncing: false }));
-    } catch (e) {
-      console.error('[Sync] Failed to fetch session data:', e);
-      setState((prev) => ({ ...prev, syncing: false }));
-    }
-  }, [wsUrl]);
+    },
+    [wsUrl],
+  )
 
-  const startPolling = useCallback((sessionId: string, intervalMs = 10000) => {
-    console.log('[Sync] Starting periodic polling for session:', sessionId, 'interval:', intervalMs, 'ms');
-    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    pollIntervalRef.current = setInterval(() => {
-      const currentSessionId = new URLSearchParams(window.location.search).get('sessionId');
-      if (currentSessionId) {
-        console.log('[Sync] Periodic poll triggered');
-        fetchSessionData(currentSessionId, true);
-      }
-    }, intervalMs);
-  }, [fetchSessionData]);
+  const startPolling = useCallback(
+    (sessionId: string, intervalMs = 10000) => {
+      console.log(
+        '[Sync] Starting periodic polling for session:',
+        sessionId,
+        'interval:',
+        intervalMs,
+        'ms',
+      )
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = setInterval(() => {
+        const currentSessionId = new URLSearchParams(
+          window.location.search,
+        ).get('sessionId')
+        if (currentSessionId) {
+          console.log('[Sync] Periodic poll triggered')
+          fetchSessionData(currentSessionId, true)
+        }
+      }, intervalMs)
+    },
+    [fetchSessionData],
+  )
 
   const stopPolling = useCallback(() => {
     if (pollIntervalRef.current) {
-      console.log('[Sync] Stopping periodic polling');
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
+      console.log('[Sync] Stopping periodic polling')
+      clearInterval(pollIntervalRef.current)
+      pollIntervalRef.current = null
     }
-  }, []);
+  }, [])
 
   // Populate refs after callbacks are defined
-  fetchSessionsRef.current = fetchSessions;
-  fetchSessionDataRef.current = fetchSessionData;
-  startPollingRef.current = startPolling;
+  fetchSessionsRef.current = fetchSessions
+  fetchSessionDataRef.current = fetchSessionData
+  startPollingRef.current = startPolling
 
   const handleServerMessage = useCallback((msg: ServerMessage) => {
     switch (msg.type) {
       case 'session_created':
         setState((prev) => ({
           ...prev,
-          session: prev.session ? { ...prev.session, id: msg.sessionId } : { id: msg.sessionId } as Session,
+          session: prev.session
+            ? { ...prev.session, id: msg.sessionId }
+            : ({ id: msg.sessionId } as Session),
           isLoading: false,
-        }));
+        }))
         // Reconnect to the specific session stream
-        connect(msg.sessionId);
-        break;
+        connect(msg.sessionId)
+        break
 
       case 'session_resumed':
-        console.log('[State] Session resumed:', msg.session.status, 'history length:', msg.session.history?.length);
+        console.log(
+          '[State] Session resumed:',
+          msg.session.status,
+          'history length:',
+          msg.session.history?.length,
+        )
         setState((prev) => ({
           ...prev,
           session: msg.session,
           messages: msg.session.history,
           isThinking: msg.session.isThinking ?? false,
           currentToolCall: msg.session.currentToolCall ?? null,
-          isLoading: msg.session.status === 'working' || (msg.session.isThinking ?? false) || !!msg.session.currentToolCall,
+          isLoading:
+            msg.session.status === 'working' ||
+            (msg.session.isThinking ?? false) ||
+            !!msg.session.currentToolCall,
           pendingPermission: msg.session.pendingPermission ?? null,
-        }));
-        break;
+        }))
+        break
 
       case 'session_data':
-        console.log('[State] Session data update:', msg.session.status);
+        console.log('[State] Session data update:', msg.session.status)
         setState((prev) => ({
           ...prev,
           session: msg.session,
           messages: msg.session.history,
           isThinking: msg.session.isThinking ?? prev.isThinking,
           currentToolCall: msg.session.currentToolCall ?? prev.currentToolCall,
-        }));
-        break;
+        }))
+        break
 
       case 'sessions_list':
-        console.log('[State] Sessions list:', msg.sessions.length, 'sessions');
+        console.log('[State] Sessions list:', msg.sessions.length, 'sessions')
         setState((prev) => ({
           ...prev,
           sessions: msg.sessions,
-        }));
-        break;
+        }))
+        break
 
       case 'status':
-        console.log('[State] Status update:', msg.status, 'message:', msg.message);
+        console.log(
+          '[State] Status update:',
+          msg.status,
+          'message:',
+          msg.message,
+        )
         setState((prev) => ({
           ...prev,
           session: prev.session
@@ -280,56 +386,62 @@ export function usePocket(wsUrl: string) {
             : null,
           isLoading: !['ready', 'done', 'error'].includes(msg.status),
           notification: msg.message ?? null,
-        }));
+        }))
 
         if (msg.message) {
           setTimeout(() => {
-            setState((prev) => ({ ...prev, notification: null }));
-          }, 5000);
+            setState((prev) => ({ ...prev, notification: null }))
+          }, 5000)
         }
-        break;
+        break
 
       case 'user_message':
         setState((prev) => ({
           ...prev,
           messages: [...prev.messages, { role: 'user', content: msg.content }],
-        }));
-        break;
+        }))
+        break
 
       case 'thinking_start':
         setState((prev) => ({
           ...prev,
           isThinking: true,
-        }));
-        break;
+        }))
+        break
 
       case 'reasoning':
         setState((prev) => {
           if (prev.messages.length > 0) {
-            const lastMsg = prev.messages[prev.messages.length - 1];
+            const lastMsg = prev.messages[prev.messages.length - 1]
             if (lastMsg.role === 'assistant') {
               return {
                 ...prev,
                 isThinking: false,
                 messages: [
                   ...prev.messages.slice(0, -1),
-                  { ...lastMsg, reasoning: (lastMsg.reasoning || '') + msg.content },
+                  {
+                    ...lastMsg,
+                    reasoning: (lastMsg.reasoning || '') + msg.content,
+                  },
                 ],
-              };
+              }
             }
           }
           return {
             ...prev,
             isThinking: false,
-            messages: [...prev.messages, { role: 'assistant', content: '', reasoning: msg.content }],
-          };
-        });
-        break;
+            messages: [
+              ...prev.messages,
+              { role: 'assistant', content: '', reasoning: msg.content },
+            ],
+          }
+        })
+        break
 
       case 'token':
         setState((prev) => {
           if (prev.messages.length > 0) {
-            const lastMsg = prev.messages[prev.messages.length - 1];
+            const lastMsg = prev.messages[prev.messages.length - 1]
             if (lastMsg.role === 'assistant') {
               return {
                 ...prev,
@@ -338,23 +450,26 @@ export function usePocket(wsUrl: string) {
                   ...prev.messages.slice(0, -1),
                   { ...lastMsg, content: lastMsg.content + msg.content },
                 ],
-              };
+              }
             }
           }
           return {
             ...prev,
             isThinking: false,
-            messages: [...prev.messages, { role: 'assistant', content: msg.content }],
-          };
-        });
-        break;
+            messages: [
+              ...prev.messages,
+              { role: 'assistant', content: msg.content },
+            ],
+          }
+        })
+        break
 
       case 'tool_start':
         setState((prev) => ({
           ...prev,
           currentToolCall: { name: msg.tool, args: msg.args },
-        }));
-        break;
+        }))
+        break
 
       case 'tool_result':
         setState((prev) => ({
@@ -370,8 +485,8 @@ export function usePocket(wsUrl: string) {
             },
           ],
           isLoading: false,
-        }));
-        break;
+        }))
+        break
 
       case 'done':
         setState((prev) => ({
@@ -381,11 +496,11 @@ export function usePocket(wsUrl: string) {
           currentToolCall: null,
           prUrl: msg.prUrl ?? prev.prUrl,
           session: prev.session ? { ...prev.session, status: 'done' } : null,
-        }));
-        break;
+        }))
+        break
 
       case 'debug':
-        break;
+        break
 
       case 'error':
         setState((prev) => ({
@@ -393,8 +508,8 @@ export function usePocket(wsUrl: string) {
           isLoading: false,
           isThinking: false,
           error: msg.error,
-        }));
-        break;
+        }))
+        break
 
       case 'aborted':
         setState((prev) => ({
@@ -402,8 +517,8 @@ export function usePocket(wsUrl: string) {
           isLoading: false,
           isThinking: false,
           currentToolCall: null,
-        }));
-        break;
+        }))
+        break
 
       case 'permission_request':
         setState((prev) => ({
@@ -414,43 +529,53 @@ export function usePocket(wsUrl: string) {
             args: msg.args,
             reason: msg.reason,
           },
-        }));
-        break;
+        }))
+        break
     }
-  }, []);
+  }, [])
 
-  const post = useCallback(async (path: string, body: object) => {
-    const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-    const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
-    try {
-      const res = await fetch(`${baseUrl}${path}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
+  const post = useCallback(
+    async (path: string, body: object) => {
+      const isLocal =
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1'
+      const baseUrl = isLocal
+        ? ''
+        : wsUrl
+            .replace('ws://', 'http://')
+            .replace('wss://', 'https://')
+            .replace('/ws', '')
+      try {
+        const res = await fetch(`${baseUrl}${path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
 
-      if (!res.ok) {
-        let errorText = await res.text();
-        try {
-          const json = JSON.parse(errorText);
-          errorText = json.error || json.message || errorText;
-        } catch {
-          // Not JSON, use raw text
+        if (!res.ok) {
+          let errorText = await res.text()
+          try {
+            const json = JSON.parse(errorText)
+            errorText = json.error || json.message || errorText
+          } catch {
+            // Not JSON, use raw text
+          }
+          const errorMsg = `Error ${res.status}: ${errorText}`
+          console.error(`Post to ${path} failed:`, errorMsg)
+          setState((prev) => ({ ...prev, error: errorMsg }))
+          return { error: errorMsg, status: res.status }
         }
-        const errorMsg = `Error ${res.status}: ${errorText}`;
-        console.error(`Post to ${path} failed:`, errorMsg);
-        setState(prev => ({ ...prev, error: errorMsg }));
-        return { error: errorMsg, status: res.status };
-      }
 
-      return await res.json();
-    } catch (e) {
-      console.error(`Post to ${path} failed:`, e);
-      const errorMsg = e instanceof Error ? e.message : 'Request failed';
-      setState(prev => ({ ...prev, error: errorMsg }));
-      return { error: errorMsg };
-    }
-  }, [wsUrl]);
+        return await res.json()
+      } catch (e) {
+        console.error(`Post to ${path} failed:`, e)
+        const errorMsg = e instanceof Error ? e.message : 'Request failed'
+        setState((prev) => ({ ...prev, error: errorMsg }))
+        return { error: errorMsg }
+      }
+    },
+    [wsUrl],
+  )
 
   const createSession = useCallback(
     async (repoUrl: string, task: string, githubToken?: string) => {
@@ -468,28 +593,31 @@ export function usePocket(wsUrl: string) {
         },
         messages: [],
         error: null,
-      }));
-      const data = await post('/api/sessions', { repoUrl, task, githubToken });
+      }))
+      const data = await post('/api/sessions', { repoUrl, task, githubToken })
       if (data?.sessionId) {
-        handleServerMessage(data);
+        handleServerMessage(data)
       }
     },
-    [post, handleServerMessage]
-  );
+    [post, handleServerMessage],
+  )
 
   const listSessions = useCallback(() => {
-    fetchSessions();
-  }, [fetchSessions]);
+    fetchSessions()
+  }, [fetchSessions])
 
   const respondToPermission = useCallback(
     async (requestId: string, granted: boolean) => {
-      const sessionId = state.session?.id;
-      if (!sessionId) return;
-      await post(`/api/sessions/${sessionId}/permission`, { requestId, granted });
-      setState((prev) => ({ ...prev, pendingPermission: null }));
+      const sessionId = state.session?.id
+      if (!sessionId) return
+      await post(`/api/sessions/${sessionId}/permission`, {
+        requestId,
+        granted,
+      })
+      setState((prev) => ({ ...prev, pendingPermission: null }))
     },
-    [post, state.session?.id]
-  );
+    [post, state.session?.id],
+  )
 
   const createLocalSession = useCallback(
     async (task: string) => {
@@ -508,124 +636,134 @@ export function usePocket(wsUrl: string) {
         },
         messages: [],
         error: null,
-      }));
-      const data = await post('/api/sessions/local', { task });
+      }))
+      const data = await post('/api/sessions/local', { task })
       if (data?.sessionId) {
-        handleServerMessage(data);
+        handleServerMessage(data)
       }
     },
-    [post, handleServerMessage]
-  );
+    [post, handleServerMessage],
+  )
 
   const resumeSession = useCallback(
     (sessionId: string) => {
-      setState((prev) => ({ ...prev, isLoading: true }));
-      connect(sessionId);
+      setState((prev) => ({ ...prev, isLoading: true }))
+      connect(sessionId)
     },
-    [connect]
-  );
+    [connect],
+  )
 
   const clone = useCallback(
     (sessionId: string) => {
-      console.log('[Action] Clone started for session:', sessionId);
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
+      console.log('[Action] Clone started for session:', sessionId)
+      setState((prev) => ({ ...prev, isLoading: true, error: null }))
       // Ensure polling is active during long-running operation
-      startPolling(sessionId, 10000);
+      startPolling(sessionId, 10000)
       post(`/api/sessions/${sessionId}/clone`, {}).catch((e) => {
-        console.error('[Action] Clone failed:', e);
-        setState((prev) => ({ ...prev, isLoading: false, error: e.message || 'Clone failed' }));
-      });
+        console.error('[Action] Clone failed:', e)
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: e.message || 'Clone failed',
+        }))
+      })
     },
-    [post, startPolling]
-  );
+    [post, startPolling],
+  )
 
   const createBranch = useCallback(
     (sessionId: string) => {
-      console.log('[Action] Create branch started for session:', sessionId);
-      setState((prev) => ({ ...prev, isLoading: true, error: null }));
+      console.log('[Action] Create branch started for session:', sessionId)
+      setState((prev) => ({ ...prev, isLoading: true, error: null }))
       // Ensure polling is active during long-running operation
-      startPolling(sessionId, 10000);
+      startPolling(sessionId, 10000)
       post(`/api/sessions/${sessionId}/create_branch`, {}).catch((e) => {
-        console.error('[Action] Create branch failed:', e);
-        setState((prev) => ({ ...prev, isLoading: false, error: e.message || 'Branch creation failed' }));
-      });
+        console.error('[Action] Create branch failed:', e)
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: e.message || 'Branch creation failed',
+        }))
+      })
     },
-    [post, startPolling]
-  );
+    [post, startPolling],
+  )
 
   const sendMessage = useCallback(
     (sessionId: string, content: string, model?: string) => {
-      setState((prev) => ({ ...prev, isLoading: true }));
-      post(`/api/sessions/${sessionId}/chat`, { content, model });
+      setState((prev) => ({ ...prev, isLoading: true }))
+      post(`/api/sessions/${sessionId}/chat`, { content, model })
     },
-    [post]
-  );
+    [post],
+  )
 
-const disconnect = useCallback(() => {
-    console.log('[SSE] Disconnecting');
+  const disconnect = useCallback(() => {
+    console.log('[SSE] Disconnecting')
     if (eventSourceRef.current) {
-      eventSourceRef.current.close();
-      eventSourceRef.current = null;
+      eventSourceRef.current.close()
+      eventSourceRef.current = null
     }
     if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-      reconnectTimeoutRef.current = undefined;
+      clearTimeout(reconnectTimeoutRef.current)
+      reconnectTimeoutRef.current = undefined
     }
-    stopPolling();
-    setState((prev) => ({ ...prev, connected: false }));
-  }, [stopPolling]);
+    stopPolling()
+    setState((prev) => ({ ...prev, connected: false, isConnecting: false }))
+  }, [stopPolling])
 
   const commit = useCallback(
     (sessionId: string) => {
-      post(`/api/sessions/${sessionId}/commit`, {});
+      post(`/api/sessions/${sessionId}/commit`, {})
     },
-    [post]
-  );
+    [post],
+  )
 
   const createPR = useCallback(
     (sessionId: string) => {
-      post(`/api/sessions/${sessionId}/create_pr`, {});
+      post(`/api/sessions/${sessionId}/create_pr`, {})
     },
-    [post]
-  );
+    [post],
+  )
 
   useEffect(() => {
-    if (!wsUrl) return;
+    if (!wsUrl) return
 
     // On mount, if we have a session in the URL (handled by parent usually), we connect to it.
-    // Otherwise we connect to global stream.
-    const searchParams = new URLSearchParams(window.location.search);
-    const sessionId = searchParams.get('sessionId');
+    // Otherwise we rely on polling for the sessions list.
+    const searchParams = new URLSearchParams(window.location.search)
+    const sessionId = searchParams.get('sessionId')
 
-    connect(sessionId || undefined);
+    connect(sessionId || undefined)
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        console.log('[Visibility] Tab became visible, fetching latest status');
-        const currentSessionId = new URLSearchParams(window.location.search).get('sessionId');
+        console.log('[Visibility] Tab became visible, fetching latest status')
+        const currentSessionId = new URLSearchParams(
+          window.location.search,
+        ).get('sessionId')
         if (currentSessionId) {
           // Immediately fetch latest status when tab becomes visible
-          fetchSessionData(currentSessionId, true);
+          fetchSessionData(currentSessionId, true)
           // Restart polling if not already running
-          startPolling(currentSessionId, 10000);
+          startPolling(currentSessionId, 10000)
         }
-        connect(currentSessionId || undefined);
+        connect(currentSessionId || undefined)
       } else {
-        console.log('[Visibility] Tab hidden');
+        console.log('[Visibility] Tab hidden')
       }
-    };
+    }
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
-      console.log('[Effect] Cleaning up usePocket');
-      disconnect();
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
-    };
-  }, [connect, disconnect, wsUrl, fetchSessionData, startPolling]);
+      console.log('[Effect] Cleaning up usePocket')
+      disconnect()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current)
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
+    }
+  }, [connect, disconnect, wsUrl, fetchSessionData, startPolling])
 
   return {
     ...state,
@@ -640,9 +778,9 @@ const disconnect = useCallback(() => {
     commit,
     createPR,
     preSetup: (sessionId: string) => {
-      setState((prev) => ({ ...prev, isLoading: true }));
-      post(`/api/sessions/${sessionId}/chat`, { isPreSetup: true });
+      setState((prev) => ({ ...prev, isLoading: true }))
+      post(`/api/sessions/${sessionId}/chat`, { isPreSetup: true })
     },
     disconnect,
-  };
+  }
 }

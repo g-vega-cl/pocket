@@ -1,19 +1,20 @@
-import { useState, useRef, useEffect } from 'react';
-import { usePocket } from '#/hooks/usePocket';
-import type { SessionStatus } from '#/hooks/usePocket';
+import { useState, useRef, useEffect } from 'react'
+import { usePocket } from '#/hooks/usePocket'
+import type { SessionStatus } from '#/hooks/usePocket'
 
 export function PocketApp() {
-  const [wsUrl, setWsUrl] = useState<string>('');
-  const [isMounted, setIsMounted] = useState(false);
+  const [wsUrl, setWsUrl] = useState<string>('')
+  const [isMounted, setIsMounted] = useState(false)
 
   useEffect(() => {
-    setIsMounted(true);
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    setWsUrl(`${protocol}//${window.location.host}/ws`);
-  }, []);
+    setIsMounted(true)
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    setWsUrl(`${protocol}//${window.location.host}/ws`)
+  }, [])
 
   const {
     connected,
+    isConnecting,
     syncing,
     lastSyncTime,
     session,
@@ -37,101 +38,104 @@ export function PocketApp() {
     createPR,
     preSetup,
     pendingPermission,
-  } = usePocket(wsUrl);
+  } = usePocket(wsUrl)
 
-  const [repoUrl, setRepoUrl] = useState('');
-  const [task, setTask] = useState('');
-  const [githubToken, setGithubToken] = useState('');
-  const [inputValue, setInputValue] = useState('');
-  const [sessionIdInput, setSessionIdInput] = useState('');
-  const [selectedModel, setSelectedModel] = useState('stepfun/step-3.5-flash');
+  const [repoUrl, setRepoUrl] = useState('')
+  const [task, setTask] = useState('')
+  const [githubToken, setGithubToken] = useState('')
+  const [inputValue, setInputValue] = useState('')
+  const [sessionIdInput, setSessionIdInput] = useState('')
+  const [selectedModel, setSelectedModel] = useState('stepfun/step-3.5-flash')
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const sid = params.get('sessionId');
+    const params = new URLSearchParams(window.location.search)
+    const sid = params.get('sessionId')
     if (sid && connected && !session) {
-      resumeSession(sid);
+      resumeSession(sid)
     }
-  }, [connected, resumeSession, session]);
+  }, [connected, resumeSession, session])
 
   useEffect(() => {
-    const url = new URL(window.location.href);
+    const url = new URL(window.location.href)
     if (session?.id) {
-      url.searchParams.set('sessionId', session.id);
-      window.history.replaceState({}, '', url.toString());
-    } else if (session === null && !new URLSearchParams(window.location.search).get('sessionId')) {
+      url.searchParams.set('sessionId', session.id)
+      window.history.replaceState({}, '', url.toString())
+    } else if (
+      session === null &&
+      !new URLSearchParams(window.location.search).get('sessionId')
+    ) {
       // Only clear if we explicitly have no session and no sessionId in URL
       // This avoids clearing the URL before the resumeSession effect has a chance to run
     }
-  }, [session?.id]);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  }, [session?.id])
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
 
   const handleStart = () => {
-    if (!repoUrl || !task) return;
-    createSession(repoUrl, task, githubToken);
-  };
+    if (!repoUrl || !task) return
+    createSession(repoUrl, task, githubToken)
+  }
 
   const handleStartLocal = () => {
-    if (!task) return;
-    createLocalSession(task);
-  };
+    if (!task) return
+    createLocalSession(task)
+  }
 
   const handleResume = () => {
-    if (!sessionIdInput) return;
-    resumeSession(sessionIdInput);
-  };
+    if (!sessionIdInput) return
+    resumeSession(sessionIdInput)
+  }
 
   const handleClone = () => {
-    if (!session?.id) return;
-    clone(session.id);
-  };
+    if (!session?.id) return
+    clone(session.id)
+  }
 
   const handleCreateBranch = () => {
-    if (!session?.id) return;
-    createBranch(session.id);
-  };
+    if (!session?.id) return
+    createBranch(session.id)
+  }
 
   const handleSendMessage = (e?: React.FormEvent) => {
-    e?.preventDefault();
-    if (!inputValue.trim() || !session?.id.trim() || isLoading) return;
-    sendMessage(session.id, inputValue, selectedModel);
-    setInputValue('');
-  };
+    e?.preventDefault()
+    if (!inputValue.trim() || !session?.id.trim() || isLoading) return
+    sendMessage(session.id, inputValue, selectedModel)
+    setInputValue('')
+  }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
+      e.preventDefault()
+      handleSendMessage()
     }
-  };
+  }
 
   const getStatusMessage = (status: SessionStatus) => {
     switch (status) {
       case 'created':
-        return 'Session created. Click "Clone" to start.';
+        return 'Session created. Click "Clone" to start.'
       case 'cloning':
-        return 'Cloning repository...';
+        return 'Cloning repository...'
       case 'cloned':
-        return 'Repository cloned. Click "Create Branch" to continue.';
+        return 'Repository cloned. Click "Create Branch" to continue.'
       case 'creating_branch':
-        return 'Creating branch...';
+        return 'Creating branch...'
       case 'ready':
-        return 'Ready! Type your task in the chat below.';
+        return 'Ready! Type your task in the chat below.'
       case 'working':
-        return 'Agent is working...';
+        return 'Agent is working...'
       case 'done':
-        return 'Ready for more!';
+        return 'Ready for more!'
       case 'error':
-        return 'An error occurred.';
+        return 'An error occurred.'
       default:
-        return '';
+        return ''
     }
-  };
+  }
 
   const renderSetup = () => (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -139,7 +143,9 @@ export function PocketApp() {
         <h2 className="text-xl font-semibold mb-4">New Session</h2>
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">GitHub Repository URL</label>
+            <label className="block text-sm font-medium mb-1">
+              GitHub Repository URL
+            </label>
             <input
               type="text"
               value={repoUrl}
@@ -149,7 +155,9 @@ export function PocketApp() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Task Description</label>
+            <label className="block text-sm font-medium mb-1">
+              Task Description
+            </label>
             <textarea
               value={task}
               onChange={(e) => setTask(e.target.value)}
@@ -170,8 +178,8 @@ export function PocketApp() {
               className="w-full px-4 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             <p className="text-xs text-gray-500 mt-1">
-              Uses GITHUB_TOKEN from .env if left blank. Use this if you need to provide new
-              credentials.
+              Uses GITHUB_TOKEN from .env if left blank. Use this if you need to
+              provide new credentials.
             </p>
           </div>
           <div className="flex gap-4">
@@ -226,9 +234,13 @@ export function PocketApp() {
               >
                 <div className="flex justify-between items-start mb-1">
                   <span className="font-medium text-blue-600 dark:text-blue-400 group-hover:underline">
-                    {s.task.length > 60 ? s.task.substring(0, 60) + '...' : s.task}
+                    {s.task.length > 60
+                      ? s.task.substring(0, 60) + '...'
+                      : s.task}
                   </span>
-                  <span className="text-xs text-gray-400 font-mono">{s.id}</span>
+                  <span className="text-xs text-gray-400 font-mono">
+                    {s.id}
+                  </span>
                 </div>
                 <div className="flex justify-between items-center text-xs text-gray-500">
                   <span className="truncate max-w-[200px]">{s.repoUrl}</span>
@@ -240,7 +252,7 @@ export function PocketApp() {
         </div>
       )}
     </div>
-  );
+  )
 
   const renderWorkflow = () => (
     <div className="max-w-4xl mx-auto">
@@ -256,7 +268,9 @@ export function PocketApp() {
                 connected ? 'bg-green-500' : 'bg-red-500'
               }`}
             />
-            <span className="text-sm">{connected ? 'Connected' : 'Disconnected'}</span>
+            <span className="text-sm">
+              {connected ? 'Connected' : 'Disconnected'}
+            </span>
           </div>
         </div>
 
@@ -267,7 +281,9 @@ export function PocketApp() {
           </div>
           <div>
             <span className="text-gray-500">Branch:</span>
-            <span className="ml-2 font-mono text-xs">{session?.branchName || 'Not created'}</span>
+            <span className="ml-2 font-mono text-xs">
+              {session?.branchName || 'Not created'}
+            </span>
           </div>
         </div>
 
@@ -286,8 +302,20 @@ export function PocketApp() {
           {syncing && (
             <span className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
               <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                  fill="none"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                />
               </svg>
               Syncing
             </span>
@@ -307,7 +335,9 @@ export function PocketApp() {
 
         {prUrl && (
           <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
-            <p className="text-sm font-medium text-green-800 mb-1">Pull Request Created!</p>
+            <p className="text-sm font-medium text-green-800 mb-1">
+              Pull Request Created!
+            </p>
             <a
               href={prUrl}
               target="_blank"
@@ -321,21 +351,31 @@ export function PocketApp() {
 
         {pendingPermission && (
           <div className="mt-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg shadow-sm">
-            <h3 className="text-lg font-semibold text-yellow-800 mb-2">Permission Required</h3>
-            <p className="text-sm text-yellow-700 mb-4">{pendingPermission.reason}</p>
+            <h3 className="text-lg font-semibold text-yellow-800 mb-2">
+              Permission Required
+            </h3>
+            <p className="text-sm text-yellow-700 mb-4">
+              {pendingPermission.reason}
+            </p>
             <div className="bg-white/50 p-2 rounded mb-4 font-mono text-xs">
               <p>Tool: {pendingPermission.tool}</p>
-              <pre className="mt-1 overflow-x-auto">{JSON.stringify(pendingPermission.args, null, 2)}</pre>
+              <pre className="mt-1 overflow-x-auto">
+                {JSON.stringify(pendingPermission.args, null, 2)}
+              </pre>
             </div>
             <div className="flex gap-3">
               <button
-                onClick={() => respondToPermission(pendingPermission.requestId, true)}
+                onClick={() =>
+                  respondToPermission(pendingPermission.requestId, true)
+                }
                 className="px-4 py-2 bg-green-600 text-white rounded font-medium hover:bg-green-700 transition"
               >
                 Approve
               </button>
               <button
-                onClick={() => respondToPermission(pendingPermission.requestId, false)}
+                onClick={() =>
+                  respondToPermission(pendingPermission.requestId, false)
+                }
                 className="px-4 py-2 bg-red-600 text-white rounded font-medium hover:bg-red-700 transition"
               >
                 Deny
@@ -360,11 +400,13 @@ export function PocketApp() {
               disabled={session.status === 'creating_branch'}
               className="px-4 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 disabled:opacity-50"
             >
-              {session.status === 'creating_branch' ? 'Creating...' : 'Create Branch'}
+              {session.status === 'creating_branch'
+                ? 'Creating...'
+                : 'Create Branch'}
             </button>
           )}
           {session && session.branchName && (
-             <button
+            <button
               onClick={() => preSetup(session.id)}
               disabled={isLoading}
               className="px-4 py-2 bg-amber-600 text-white rounded-lg text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
@@ -378,11 +420,17 @@ export function PocketApp() {
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
             <div className="flex items-center gap-2 mb-1">
               <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                <path
+                  fillRule="evenodd"
+                  d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                  clipRule="evenodd"
+                />
               </svg>
               <span className="font-medium">Error:</span>
             </div>
-            <pre className="whitespace-pre-wrap font-mono text-xs mt-1">{error}</pre>
+            <pre className="whitespace-pre-wrap font-mono text-xs mt-1">
+              {error}
+            </pre>
           </div>
         )}
 
@@ -428,20 +476,26 @@ export function PocketApp() {
           {messages.map((msg, i) => {
             if (msg.role === 'tool') {
               return (
-                <div key={i} className="flex justify-start opacity-60 hover:opacity-100 transition-opacity">
+                <div
+                  key={i}
+                  className="flex justify-start opacity-60 hover:opacity-100 transition-opacity"
+                >
                   <div className="max-w-[90%] w-full rounded-xl px-4 py-1 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-xs">
                     <details>
                       <summary className="cursor-pointer font-mono py-1 flex justify-between items-center">
                         <span>Tool Result</span>
                         {msg.timestamp && (
                           <span className="text-[10px] text-gray-400">
-                            {new Date(msg.timestamp).toLocaleString('sv-SE', {
-                              year: 'numeric',
-                              month: '2-digit',
-                              day: '2-digit',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            }).replace('-', '/').replace('-', '/')}
+                            {new Date(msg.timestamp)
+                              .toLocaleString('sv-SE', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })
+                              .replace('-', '/')
+                              .replace('-', '/')}
                           </span>
                         )}
                       </summary>
@@ -451,46 +505,58 @@ export function PocketApp() {
                     </details>
                   </div>
                 </div>
-              );
+              )
             }
             return (
-            <div key={i} className="space-y-1">
-              <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {msg.timestamp && (
-                  <span className="text-[10px] text-gray-400 px-2">
-                    {new Date(msg.timestamp).toLocaleString('sv-SE', {
-                      year: 'numeric',
-                      month: '2-digit',
-                      day: '2-digit',
-                      hour: '2-digit',
-                      minute: '2-digit',
-                    }).replace('-', '/').replace('-', '/')}
-                  </span>
-                )}
-              </div>
-            <div
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              <div
-                className={`max-w-[80%] rounded-xl px-4 py-2 ${
-                  msg.role === 'user'
-                    ? 'bg-blue-600 text-white'
-                    : msg.role === 'system'
-                      ? 'bg-gray-200 dark:bg-gray-700 text-sm italic'
-                      : 'bg-gray-100 dark:bg-gray-700'
-                }`}
-              >
-                {msg.role === 'assistant' && msg.reasoning && (
-                  <div className="mb-2 pb-2 border-b border-gray-300 dark:border-gray-600">
-                    <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">Thinking</p>
-                    <pre className="whitespace-pre-wrap font-sans text-sm text-gray-600 dark:text-gray-300">{msg.reasoning}</pre>
+              <div key={i} className="space-y-1">
+                <div
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  {msg.timestamp && (
+                    <span className="text-[10px] text-gray-400 px-2">
+                      {new Date(msg.timestamp)
+                        .toLocaleString('sv-SE', {
+                          year: 'numeric',
+                          month: '2-digit',
+                          day: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })
+                        .replace('-', '/')
+                        .replace('-', '/')}
+                    </span>
+                  )}
+                </div>
+                <div
+                  className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                >
+                  <div
+                    className={`max-w-[80%] rounded-xl px-4 py-2 ${
+                      msg.role === 'user'
+                        ? 'bg-blue-600 text-white'
+                        : msg.role === 'system'
+                          ? 'bg-gray-200 dark:bg-gray-700 text-sm italic'
+                          : 'bg-gray-100 dark:bg-gray-700'
+                    }`}
+                  >
+                    {msg.role === 'assistant' && msg.reasoning && (
+                      <div className="mb-2 pb-2 border-b border-gray-300 dark:border-gray-600">
+                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 mb-1">
+                          Thinking
+                        </p>
+                        <pre className="whitespace-pre-wrap font-sans text-sm text-gray-600 dark:text-gray-300">
+                          {msg.reasoning}
+                        </pre>
+                      </div>
+                    )}
+                    <pre className="whitespace-pre-wrap font-sans text-sm">
+                      {msg.content}
+                    </pre>
                   </div>
-                )}
-                <pre className="whitespace-pre-wrap font-sans text-sm">{msg.content}</pre>
+                </div>
               </div>
-            </div>
-            </div>
-          );})}
+            )
+          })}
 
           {currentToolCall && (
             <div className="flex justify-start">
@@ -500,7 +566,8 @@ export function PocketApp() {
                     <div className="animate-spin w-3 h-3 border-2 border-yellow-600 border-t-transparent rounded-full" />
                   )}
                   <p className="text-sm font-bold text-yellow-800 dark:text-yellow-200">
-                    Tool: {currentToolCall.name} {currentToolCall.result ? '(Completed)' : '(Running...)'}
+                    Tool: {currentToolCall.name}{' '}
+                    {currentToolCall.result ? '(Completed)' : '(Running...)'}
                   </p>
                 </div>
                 <details className="mb-2">
@@ -513,7 +580,9 @@ export function PocketApp() {
                 </details>
                 {currentToolCall.result && (
                   <div className="mt-2 pt-2 border-t border-yellow-200 dark:border-yellow-800">
-                    <p className="text-xs font-bold text-yellow-800 dark:text-yellow-200 mb-1">Result:</p>
+                    <p className="text-xs font-bold text-yellow-800 dark:text-yellow-200 mb-1">
+                      Result:
+                    </p>
                     <pre className="text-xs p-2 bg-black/5 rounded font-mono overflow-x-auto max-h-60 overflow-y-auto">
                       {typeof currentToolCall.result === 'string'
                         ? currentToolCall.result
@@ -538,7 +607,9 @@ export function PocketApp() {
                     className="w-2 h-2 bg-gray-400 rounded-full animate-bounce"
                     style={{ animationDelay: '0.2s' }}
                   />
-                  <span className="text-sm text-gray-500 ml-1">Thinking...</span>
+                  <span className="text-sm text-gray-500 ml-1">
+                    Thinking...
+                  </span>
                 </div>
               </div>
             </div>
@@ -566,7 +637,10 @@ export function PocketApp() {
         </div>
 
         {(session?.status === 'ready' || session?.status === 'done') && (
-          <form onSubmit={handleSendMessage} className="border-t dark:border-gray-700 p-4">
+          <form
+            onSubmit={handleSendMessage}
+            className="border-t dark:border-gray-700 p-4"
+          >
             <div className="flex items-center gap-2 mb-2">
               <input
                 type="text"
@@ -599,11 +673,11 @@ export function PocketApp() {
         )}
       </div>
     </div>
-  );
+  )
 
   return (
     <main className="min-h-screen bg-gray-50 dark:bg-gray-900 py-8">
-      {!connected && (
+      {isConnecting && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center">
           <div className="bg-white dark:bg-gray-800 p-8 rounded-2xl shadow-xl text-center max-w-sm mx-4">
             <div className="animate-spin w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full mx-auto mb-4" />
@@ -615,15 +689,25 @@ export function PocketApp() {
         </div>
       )}
       <div className="px-4">
-        <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Pocket</h1>
-          <p className="text-gray-600 dark:text-gray-400">
-            Autonomous coding agent for GitHub repositories
-          </p>
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
+              Pocket
+            </h1>
+            <p className="text-gray-600 dark:text-gray-400">
+              Autonomous coding agent for GitHub repositories
+            </p>
+          </div>
+          {syncing && (
+            <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <span>Syncing...</span>
+            </div>
+          )}
         </div>
 
         {!session ? renderSetup() : renderWorkflow()}
       </div>
     </main>
-  );
+  )
 }

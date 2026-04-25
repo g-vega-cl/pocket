@@ -1,5 +1,5 @@
-import '@testing-library/jest-dom';
-import { vi } from 'vitest';
+import '@testing-library/jest-dom'
+import { vi } from 'vitest'
 
 global.WebSocket = vi.fn(() => ({
   readyState: 1,
@@ -9,38 +9,38 @@ global.WebSocket = vi.fn(() => ({
   onclose: null,
   onmessage: null,
   onerror: null,
-})) as any;
+})) as any
 
-Element.prototype.scrollIntoView = vi.fn();
+Element.prototype.scrollIntoView = vi.fn()
 
-let mockEventSourceInstance: any = null;
+let mockEventSourceInstance: any = null
 
 class MockEventSource {
-  onopen: (() => void) | null = null;
-  onerror: ((e: any) => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
-  close = vi.fn();
+  onopen: (() => void) | null = null
+  onerror: ((e: any) => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  close = vi.fn()
 }
 
 global.EventSource = vi.fn(() => {
-  mockEventSourceInstance = new MockEventSource();
+  mockEventSourceInstance = new MockEventSource()
   // Simulate async connection open
   setTimeout(() => {
-    mockEventSourceInstance?.onopen?.();
-  }, 0);
-  return mockEventSourceInstance;
-}) as any;
+    mockEventSourceInstance?.onopen?.()
+  }, 0)
+  return mockEventSourceInstance
+}) as any
 
 global.mockEventSource = {
   getInstance: () => mockEventSourceInstance,
   triggerMessage: (data: any) => {
     if (mockEventSourceInstance?.onmessage) {
-      mockEventSourceInstance.onmessage({ data: JSON.stringify(data) });
+      mockEventSourceInstance.onmessage({ data: JSON.stringify(data) })
     }
   },
   triggerError: (e: any) => {
     if (mockEventSourceInstance?.onerror) {
-      mockEventSourceInstance.onerror(e);
+      mockEventSourceInstance.onerror(e)
     }
   },
-};
+}
