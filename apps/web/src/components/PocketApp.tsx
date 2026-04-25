@@ -409,8 +409,19 @@ export function PocketApp() {
                 <div key={i} className="flex justify-start opacity-60 hover:opacity-100 transition-opacity">
                   <div className="max-w-[90%] w-full rounded-xl px-4 py-1 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-xs">
                     <details>
-                      <summary className="cursor-pointer font-mono py-1">
-                        Tool Result
+                      <summary className="cursor-pointer font-mono py-1 flex justify-between items-center">
+                        <span>Tool Result</span>
+                        {msg.timestamp && (
+                          <span className="text-[10px] text-gray-400">
+                            {new Date(msg.timestamp).toLocaleString('sv-SE', {
+                              year: 'numeric',
+                              month: '2-digit',
+                              day: '2-digit',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            }).replace('-', '/').replace('-', '/')}
+                          </span>
+                        )}
                       </summary>
                       <pre className="p-2 bg-black/5 rounded overflow-x-auto max-h-40 overflow-y-auto mt-1 font-mono">
                         {msg.content}
@@ -425,7 +436,13 @@ export function PocketApp() {
               <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                 {msg.timestamp && (
                   <span className="text-[10px] text-gray-400 px-2">
-                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    {new Date(msg.timestamp).toLocaleString('sv-SE', {
+                      year: 'numeric',
+                      month: '2-digit',
+                      day: '2-digit',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                    }).replace('-', '/').replace('-', '/')}
                   </span>
                 )}
               </div>
