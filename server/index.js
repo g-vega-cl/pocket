@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import express from 'express';
 import { createServer } from 'http';
-import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { EventEmitter } from 'events';
 import { createSession, getSession, getAllSessions, updateSession, addToHistory, updateLastHistoryMessage, loadSessionsFromDisk } from './sessions.js';
 import { gitClone, gitInit, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
 import { readFile, writeFile } from './tools/file.js';
@@ -18,58 +18,22 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const server = createServer(app);
-const wss = new WebSocketServer({ server, path: '/ws' });
 
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5173;
 
-const clients = new Map();
+const sessionEvents = new EventEmitter();
 const pendingPermissions = new Map();
 
-wss.on('connection', (ws) => {
-  console.log('Client connected');
-  ws.isAlive = true;
-
-  ws.on('pong', () => {
-    ws.isAlive = true;
-  });
-
-  ws.on('message', async (data) => {
-    try {
-      const message = JSON.parse(data.toString());
-      await handleMessage(ws, message);
-    } catch (error) {
-      console.error('Error handling message:', error);
-      send(ws, { type: 'error', error: error.message });
-    }
-  });
-
-  ws.on('close', () => {
-    console.log('Client disconnected');
-    for (const [sessionId, clientWs] of clients) {
-      if (clientWs === ws) {
-        clients.delete(sessionId);
-        break;
-      }
-    }
-  });
-});
-
-const pingInterval = setInterval(() => {
-  wss.clients.forEach((ws) => {
-    if (ws.isAlive === false) {
-      return ws.terminate();
-    }
-    ws.isAlive = false;
-    ws.ping();
-  });
-}, 30000);
-
-wss.on('close', () => {
-  clearInterval(pingInterval);
-});
+function send(sessionId, data) {
+  sessionEvents.emit(`event:${sessionId}`, data);
+  // Also emit a general event for session list updates if needed
+  if (data.type === 'sessions_list' || data.type === 'session_created') {
+    sessionEvents.emit('sessions_update', data);
+  }
+}
 
 function broadcastSessionList() {
   const sessions = getAllSessions().map(s => ({
@@ -79,336 +43,350 @@ function broadcastSessionList() {
     createdAt: s.createdAt,
     status: s.status,
   }));
-  wss.clients.forEach((client) => {
-    if (client.readyState === 1) {
-      send(client, { type: 'sessions_list', sessions });
-    }
-  });
+  sessionEvents.emit('sessions_update', { type: 'sessions_list', sessions });
 }
 
-async function handleMessage(ws, message) {
-  const { type, sessionId, payload } = message;
+// SSE Endpoint
+app.get('/api/sessions/:sessionId/events', (req, res) => {
+  const { sessionId } = req.params;
 
-  switch (type) {
-    case 'list_sessions': {
-      const sessions = getAllSessions().map(s => ({
-        id: s.id,
-        repoUrl: s.repoUrl,
-        task: s.task,
-        createdAt: s.createdAt,
-        status: s.status,
-      }));
-      send(ws, { type: 'sessions_list', sessions });
-      break;
-    }
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
 
-    case 'create_session': {
-      const { repoUrl, task, githubToken } = payload;
-      const session = createSession({ repoUrl, task, githubToken });
-      console.log(`[Session] Created session ${session.id} for repo ${repoUrl}`);
-      clients.set(session.id, ws);
-      send(ws, { type: 'session_created', sessionId: session.id });
-      broadcastSessionList();
-      break;
-    }
+  const onEvent = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
 
-    case 'create_local_session': {
-      const { task } = payload;
-      const session = createSession({ repoUrl: 'local', task, isLocal: true });
-      console.log(`[Session] Created local session ${session.id}`);
-      clients.set(session.id, ws);
-      send(ws, { type: 'session_created', sessionId: session.id });
-      broadcastSessionList();
+  const onSessionsUpdate = (data) => {
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  }
 
-      // Automatically initialize local session
-      try {
-        const { localPath } = await gitInit();
-        updateSession(session.id, { localPath, status: 'ready', branchName: 'main' });
-        send(ws, { type: 'status', status: 'ready', message: 'Local session ready', localPath, branchName: 'main' });
-      } catch (error) {
-        updateSession(session.id, { status: 'error' });
-        send(ws, { type: 'error', error: `Local initialization failed: ${error.message}` });
-      }
-      break;
-    }
+  sessionEvents.on(`event:${sessionId}`, onEvent);
+  sessionEvents.on('sessions_update', onSessionsUpdate);
 
-    case 'resume_session': {
-      const session = getSession(sessionId);
-      if (!session) {
-        console.warn(`[Session] Resume failed: session ${sessionId} not found`);
-        send(ws, { type: 'error', error: 'Session not found' });
-        return;
-      }
-      console.log(`[Session] Resuming session ${session.id}`);
-      clients.set(session.id, ws);
-      send(ws, { type: 'session_resumed', session });
-      break;
-    }
+  // Heartbeat
+  const heartbeat = setInterval(() => {
+    res.write(': keep-alive\n\n');
+  }, 15000);
 
-    case 'get_session': {
-      const session = getSession(sessionId);
-      if (!session) {
-        send(ws, { type: 'error', error: 'Session not found' });
-        return;
-      }
-      send(ws, { type: 'session_data', session });
-      break;
-    }
+  req.on('close', () => {
+    clearInterval(heartbeat);
+    sessionEvents.removeListener(`event:${sessionId}`, onEvent);
+    sessionEvents.removeListener('sessions_update', onSessionsUpdate);
+  });
+});
 
-    case 'clone': {
-      const session = getSession(sessionId);
-      if (!session) {
-        send(ws, { type: 'error', error: 'Session not found' });
-        return;
-      }
+// GET /api/sessions
+app.get('/api/sessions', (req, res) => {
+  const sessions = getAllSessions().map(s => ({
+    id: s.id,
+    repoUrl: s.repoUrl,
+    task: s.task,
+    createdAt: s.createdAt,
+    status: s.status,
+  }));
+  res.json({ type: 'sessions_list', sessions });
+});
 
-      updateSession(sessionId, { status: 'cloning' });
-      send(ws, { type: 'status', status: 'cloning', message: 'Cloning repository...' });
+// POST /api/sessions
+app.post('/api/sessions', (req, res) => {
+  const { repoUrl, task, githubToken } = req.body;
+  const session = createSession({ repoUrl, task, githubToken });
+  console.log(`[Session] Created session ${session.id} for repo ${repoUrl}`);
+  broadcastSessionList();
+  res.json({ type: 'session_created', sessionId: session.id });
+});
 
-      try {
-        const { localPath } = await gitClone(session.repoUrl, session.githubToken);
-        updateSession(sessionId, { localPath, status: 'cloned' });
-        send(ws, { type: 'status', status: 'cloned', message: 'Repository cloned', localPath });
-      } catch (error) {
-        updateSession(sessionId, { status: 'error' });
-        send(ws, { type: 'error', error: `Clone failed: ${error.message}` });
-      }
-      break;
-    }
+// POST /api/sessions/local
+app.post('/api/sessions/local', async (req, res) => {
+  const { task } = req.body;
+  const session = createSession({ repoUrl: 'local', task, isLocal: true });
+  console.log(`[Session] Created local session ${session.id}`);
 
-    case 'create_branch': {
-      const session = getSession(sessionId);
-      if (!session) {
-        send(ws, { type: 'error', error: 'Session not found' });
-        return;
-      }
+  res.json({ type: 'session_created', sessionId: session.id });
+  broadcastSessionList();
 
-      if (!session.localPath) {
-        send(ws, { type: 'error', error: 'Repository not cloned yet' });
-        return;
-      }
+  // Automatically initialize local session in background
+  try {
+    const { localPath } = await gitInit();
+    updateSession(session.id, { localPath, status: 'ready', branchName: 'main' });
+    send(session.id, { type: 'status', status: 'ready', message: 'Local session ready', localPath, branchName: 'main' });
+  } catch (error) {
+    updateSession(session.id, { status: 'error' });
+    send(session.id, { type: 'error', error: `Local initialization failed: ${error.message}` });
+  }
+});
 
-      updateSession(sessionId, { status: 'creating_branch' });
-      send(ws, { type: 'status', status: 'creating_branch', message: 'Creating branch...' });
+// GET /api/sessions/:sessionId
+app.get('/api/sessions/:sessionId', (req, res) => {
+  const { sessionId } = req.params;
+  const session = getSession(sessionId);
+  if (!session) {
+    return res.status(404).json({ error: 'Session not found' });
+  }
+  res.json({ type: 'session_resumed', session });
+});
 
-      try {
-        const { branchName } = await gitCreateBranch(session.localPath, session.task);
-        send(ws, { type: 'status', status: 'creating_branch', message: 'Pushing branch to origin...' });
-        await gitPush(session.localPath, branchName, session.githubToken);
-        updateSession(sessionId, { branchName, status: 'ready' });
-        send(ws, { type: 'status', status: 'ready', message: 'Branch created and pushed', branchName });
-      } catch (error) {
-        updateSession(sessionId, { status: 'error' });
-        send(ws, { type: 'error', error: `Branch creation failed: ${error.message}` });
-      }
-      break;
-    }
+// POST /api/sessions/:sessionId/clone
+app.post('/api/sessions/:sessionId/clone', async (req, res) => {
+  const { sessionId } = req.params;
+  const session = getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
 
-    case 'pre_setup':
-    case 'chat': {
-      const session = getSession(sessionId);
-      if (!session) {
-        send(ws, { type: 'error', error: 'Session not found' });
-        return;
-      }
+  updateSession(sessionId, { status: 'cloning' });
+  send(sessionId, { type: 'status', status: 'cloning', message: 'Cloning repository...' });
 
-      if (!session.localPath || !session.branchName) {
-        send(ws, { type: 'error', error: 'Repository not ready. Please clone and create branch first.' });
-        return;
-      }
+  res.json({ status: 'started' });
 
-      let { content, model } = payload || {};
+  try {
+    const { localPath } = await gitClone(session.repoUrl, session.githubToken);
+    updateSession(sessionId, { localPath, status: 'cloned' });
+    send(sessionId, { type: 'status', status: 'cloned', message: 'Repository cloned', localPath });
+  } catch (error) {
+    updateSession(sessionId, { status: 'error' });
+    send(sessionId, { type: 'error', error: `Clone failed: ${error.message}` });
+  }
+});
 
-      if (type === 'pre_setup') {
-        content = "Please explore the repository, try to build it, and run tests. Report on what you find and if everything is working as expected.";
-      }
+// POST /api/sessions/:sessionId/create_branch
+app.post('/api/sessions/:sessionId/create_branch', async (req, res) => {
+  const { sessionId } = req.params;
+  const session = getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
 
-      console.log(`[Chat] Message from session ${sessionId}: ${content.substring(0, 100)}${content.length > 100 ? '...' : ''}`);
+  if (!session.localPath) return res.status(400).json({ error: 'Repository not cloned yet' });
 
-      addToHistory(sessionId, { role: 'user', content });
-      send(ws, { type: 'user_message', content });
+  updateSession(sessionId, { status: 'creating_branch' });
+  send(sessionId, { type: 'status', status: 'creating_branch', message: 'Creating branch...' });
 
-const repoName = session.repoUrl.split('/').pop().replace('.git', '');
-      const messages = [
-        buildSystemMessage(session.branchName, session.task, repoName, session.localPath),
-        ...session.history.map(m => {
-          const msg = { role: m.role, content: m.content };
-          if (m.tool_calls) msg.tool_calls = m.tool_calls;
-          if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
-          return msg;
-        }),
-      ];
+  res.json({ status: 'started' });
 
-      let fullResponse = '';
-      let fullReasoning = '';
+  try {
+    const { branchName } = await gitCreateBranch(session.localPath, session.task);
+    send(sessionId, { type: 'status', status: 'creating_branch', message: 'Pushing branch to origin...' });
+    await gitPush(session.localPath, branchName, session.githubToken);
+    updateSession(sessionId, { branchName, status: 'ready' });
+    send(sessionId, { type: 'status', status: 'ready', message: 'Branch created and pushed', branchName });
+  } catch (error) {
+    updateSession(sessionId, { status: 'error' });
+    send(sessionId, { type: 'error', error: `Branch creation failed: ${error.message}` });
+  }
+});
 
-      addToHistory(sessionId, { role: 'assistant', content: '', reasoning: '' });
+// POST /api/sessions/:sessionId/chat
+app.post('/api/sessions/:sessionId/chat', async (req, res) => {
+  const { sessionId } = req.params;
+  const { content, model, isPreSetup } = req.body;
+  const session = getSession(sessionId);
 
-      await streamChat(
-        messages,
-        (chunk) => {
-          fullResponse += chunk;
-          updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
-          send(sessionId, { type: 'token', content: chunk });
-        },
-        async (toolCall) => {
-          if (toolCall.status === 'start') {
-            updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments }, isThinking: false });
-            send(sessionId, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
-          } else if (toolCall.status === 'complete') {
-            // Tool call streaming complete - update history with tool_calls
-            updateLastHistoryMessage(sessionId, fullResponse, fullReasoning, [
-               {
-                 id: toolCall.id || `call_${Date.now()}`,
-                 type: 'function',
-                 function: { name: toolCall.name, arguments: JSON.stringify(toolCall.arguments) }
-               }
-            ]);
-          } else if (toolCall.status === 'result') {
-            updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments, result: toolCall.result }, isThinking: true });
-            // Tool execution result from llm.js
-            send(sessionId, { type: 'tool_result', tool: toolCall.name, result: toolCall.result });
-            // SAVE TOOL RESULT TO HISTORY
-            addToHistory(sessionId, {
-              role: 'tool',
-              content: JSON.stringify(toolCall.result),
-              tool_call: toolCall.name,
-              tool_args: toolCall.arguments,
-              tool_result: toolCall.result,
-              tool_call_id: toolCall.id || `call_${Date.now()}`
-            });
-          }
-        },
-        async (toolName, args) => {
-          const requestPermission = async (reason) => {
-            const requestId = Math.random().toString(36).substring(7);
-            send(sessionId, { type: 'permission_request', requestId, tool: toolName, args, reason });
-            return new Promise((resolve) => {
-              pendingPermissions.set(requestId, resolve);
-            });
-          };
-          return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
-        },
-        (raw) => send(sessionId, { type: 'debug', data: raw }),
-        () => {
-           updateSession(sessionId, { isThinking: true });
-           send(sessionId, { type: 'thinking_start' });
-        },
-        (chunk) => {
-          fullReasoning += chunk;
-          updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
-          send(sessionId, { type: 'reasoning', content: chunk });
-        },
-        model
-      );
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+  if (!session.localPath || !session.branchName) {
+    return res.status(400).json({ error: 'Repository not ready.' });
+  }
 
-      updateSession(sessionId, { isThinking: false, currentToolCall: null });
+  let chatContent = content;
+  if (isPreSetup) {
+    chatContent = "Please explore the repository, try to build it, and run tests. Report on what you find and if everything is working as expected.";
+  }
 
-      let prUrl = null;
-      try {
-        const { dirty } = await gitStatus(session.localPath);
-        if (dirty) {
-          send(sessionId, { type: 'status', status: 'working', message: 'Committing changes...' });
-          await gitCommit(session.localPath, `Pocket: ${session.task}`);
+  console.log(`[Chat] Message from session ${sessionId}: ${chatContent.substring(0, 100)}`);
 
-          if (!session.isLocal) {
-            send(sessionId, { type: 'status', status: 'working', message: 'Pushing changes...' });
-            await gitPush(session.localPath, session.branchName, session.githubToken);
-            send(sessionId, { type: 'status', status: 'working', message: 'Creating pull request...' });
-            const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`, session.githubToken);
-            prUrl = prResult.prUrl;
-            if (prUrl) {
-              updateSession(sessionId, { prUrl });
-            }
-          } else {
-            send(sessionId, { type: 'status', status: 'working', message: 'Changes committed locally.' });
-          }
+  const userMessage = { role: 'user', content: chatContent };
+  addToHistory(sessionId, userMessage);
+
+  // Broadcast user message to other potential clients
+  send(sessionId, { type: 'user_message', content: chatContent });
+
+  // Respond immediately that we received it
+  res.json({ status: 'processing' });
+
+  // Then start background processing
+  processChat(sessionId, chatContent, model);
+});
+
+async function processChat(sessionId, content, model) {
+  const session = getSession(sessionId);
+  const repoName = session.repoUrl.split('/').pop().replace('.git', '');
+  const messages = [
+    buildSystemMessage(session.branchName, session.task, repoName, session.localPath),
+    ...session.history.map(m => {
+      const msg = { role: m.role, content: m.content };
+      if (m.tool_calls) msg.tool_calls = m.tool_calls;
+      if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+      return msg;
+    }),
+  ];
+
+  let fullResponse = '';
+  let fullReasoning = '';
+
+  addToHistory(sessionId, { role: 'assistant', content: '', reasoning: '' });
+
+  try {
+    await streamChat(
+      messages,
+      (chunk) => {
+        fullResponse += chunk;
+        updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
+        send(sessionId, { type: 'token', content: chunk });
+      },
+      async (toolCall) => {
+        if (toolCall.status === 'start') {
+          updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments }, isThinking: false });
+          send(sessionId, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
+        } else if (toolCall.status === 'complete') {
+          updateLastHistoryMessage(sessionId, fullResponse, fullReasoning, [
+             {
+               id: toolCall.id || `call_${Date.now()}`,
+               type: 'function',
+               function: { name: toolCall.name, arguments: JSON.stringify(toolCall.arguments) }
+             }
+          ]);
+        } else if (toolCall.status === 'result') {
+          updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments, result: toolCall.result }, isThinking: true });
+          send(sessionId, { type: 'tool_result', tool: toolCall.name, result: toolCall.result });
+          addToHistory(sessionId, {
+            role: 'tool',
+            content: JSON.stringify(toolCall.result),
+            tool_call: toolCall.name,
+            tool_args: toolCall.arguments,
+            tool_result: toolCall.result,
+            tool_call_id: toolCall.id || `call_${Date.now()}`
+          });
         }
-      } catch (error) {
-        console.error('Auto-push/PR/Commit failed:', error.message);
-      }
+      },
+      async (toolName, args) => {
+        const requestPermission = async (reason) => {
+          const requestId = Math.random().toString(36).substring(7);
 
-      send(sessionId, { type: 'status', status: 'ready', message: 'Ready for more!', prUrl });
-      break;
-    }
+          // Save pending permission to session state so it's persistent
+          const pendingPermission = { requestId, tool: toolName, args, reason };
+          updateSession(sessionId, { pendingPermission });
 
-    case 'commit': {
-      const session = getSession(sessionId);
-      if (!session) {
-        send(ws, { type: 'error', error: 'Session not found' });
-        return;
-      }
+          send(sessionId, { type: 'permission_request', ...pendingPermission });
 
-      if (!session.localPath || !session.branchName) {
-        send(ws, { type: 'error', error: 'Repository not ready' });
-        return;
-      }
+          return new Promise((resolve) => {
+            pendingPermissions.set(requestId, resolve);
+          });
+        };
+        return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
+      },
+      (raw) => send(sessionId, { type: 'debug', data: raw }),
+      () => {
+         updateSession(sessionId, { isThinking: true });
+         send(sessionId, { type: 'thinking_start' });
+      },
+      (chunk) => {
+        fullReasoning += chunk;
+        updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
+        send(sessionId, { type: 'reasoning', content: chunk });
+      },
+      model
+    );
 
-      try {
-        const { dirty } = await gitStatus(session.localPath);
-        if (!dirty) {
-          send(ws, { type: 'status', status: 'ready', message: 'No changes to commit' });
-          return;
-        }
+    updateSession(sessionId, { isThinking: false, currentToolCall: null });
 
-        send(ws, { type: 'status', status: 'working', message: 'Committing changes...' });
+    // Auto-commit/PR logic...
+    let prUrl = null;
+    try {
+      const { dirty } = await gitStatus(session.localPath);
+      if (dirty) {
+        send(sessionId, { type: 'status', status: 'working', message: 'Committing changes...' });
         await gitCommit(session.localPath, `Pocket: ${session.task}`);
+
         if (!session.isLocal) {
-          send(ws, { type: 'status', status: 'working', message: 'Pushing changes...' });
+          send(sessionId, { type: 'status', status: 'working', message: 'Pushing changes...' });
           await gitPush(session.localPath, session.branchName, session.githubToken);
-          send(ws, { type: 'status', status: 'ready', message: 'Committed and pushed!' });
-        } else {
-          send(ws, { type: 'status', status: 'ready', message: 'Committed locally!' });
+          send(sessionId, { type: 'status', status: 'working', message: 'Creating pull request...' });
+          const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`, session.githubToken);
+          prUrl = prResult.prUrl;
+          if (prUrl) updateSession(sessionId, { prUrl });
         }
-      } catch (error) {
-        send(ws, { type: 'error', error: error.message });
       }
-      break;
+    } catch (error) {
+      console.error('Auto-push/PR/Commit failed:', error.message);
     }
-
-    case 'create_pr': {
-      const session = getSession(sessionId);
-      if (!session) {
-        send(ws, { type: 'error', error: 'Session not found' });
-        return;
-      }
-
-      if (!session.localPath || !session.branchName) {
-        send(ws, { type: 'error', error: 'Repository not ready' });
-        return;
-      }
-
-      try {
-        send(ws, { type: 'status', status: 'working', message: 'Creating pull request...' });
-        const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}`, session.githubToken);
-        if (prResult.prUrl) {
-          updateSession(sessionId, { prUrl: prResult.prUrl });
-          send(ws, { type: 'status', status: 'ready', message: 'PR created!', prUrl: prResult.prUrl });
-        } else {
-          send(ws, { type: 'status', status: 'ready', message: 'PR creation failed: ' + prResult.error });
-        }
-      } catch (error) {
-        send(ws, { type: 'error', error: error.message });
-      }
-      break;
-    }
-
-    case 'abort': {
-      send(ws, { type: 'aborted' });
-      break;
-    }
-
-    case 'permission_response': {
-      const { requestId, granted } = payload;
-      const resolver = pendingPermissions.get(requestId);
-      if (resolver) {
-        resolver(granted);
-        pendingPermissions.delete(requestId);
-      }
-      break;
-    }
+    send(sessionId, { type: 'status', status: 'ready', message: 'Ready for more!', prUrl });
+  } catch (error) {
+    console.error('Chat processing failed:', error);
+    updateSession(sessionId, { status: 'error', isThinking: false });
+    send(sessionId, { type: 'error', error: error.message });
   }
 }
+
+// POST /api/sessions/:sessionId/commit
+app.post('/api/sessions/:sessionId/commit', async (req, res) => {
+  const { sessionId } = req.params;
+  const session = getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  res.json({ status: 'started' });
+
+  try {
+    const { dirty } = await gitStatus(session.localPath);
+    if (!dirty) {
+      send(sessionId, { type: 'status', status: 'ready', message: 'No changes to commit' });
+      return;
+    }
+
+    send(sessionId, { type: 'status', status: 'working', message: 'Committing changes...' });
+    await gitCommit(session.localPath, `Pocket: ${session.task}`);
+    if (!session.isLocal) {
+      send(sessionId, { type: 'status', status: 'working', message: 'Pushing changes...' });
+      await gitPush(session.localPath, session.branchName, session.githubToken);
+      send(sessionId, { type: 'status', status: 'ready', message: 'Committed and pushed!' });
+    } else {
+      send(sessionId, { type: 'status', status: 'ready', message: 'Committed locally!' });
+    }
+  } catch (error) {
+    send(sessionId, { type: 'error', error: error.message });
+  }
+});
+
+// POST /api/sessions/:sessionId/create_pr
+app.post('/api/sessions/:sessionId/create_pr', async (req, res) => {
+  const { sessionId } = req.params;
+  const session = getSession(sessionId);
+  if (!session) return res.status(404).json({ error: 'Session not found' });
+
+  res.json({ status: 'started' });
+
+  try {
+    send(sessionId, { type: 'status', status: 'working', message: 'Creating pull request...' });
+    const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}`, session.githubToken);
+    if (prResult.prUrl) {
+      updateSession(sessionId, { prUrl: prResult.prUrl });
+      send(sessionId, { type: 'status', status: 'ready', message: 'PR created!', prUrl: prResult.prUrl });
+    } else {
+      send(sessionId, { type: 'status', status: 'ready', message: 'PR creation failed: ' + prResult.error });
+    }
+  } catch (error) {
+    send(sessionId, { type: 'error', error: error.message });
+  }
+});
+
+// POST /api/sessions/:sessionId/permission
+app.post('/api/sessions/:sessionId/permission', (req, res) => {
+  const { requestId, granted } = req.body;
+  const { sessionId } = req.params;
+
+  const resolver = pendingPermissions.get(requestId);
+  if (resolver) {
+    resolver(granted);
+    pendingPermissions.delete(requestId);
+
+    // Clear pending permission from session state
+    updateSession(sessionId, { pendingPermission: null });
+    res.json({ status: 'ok' });
+  } else {
+    res.status(404).json({ error: 'Permission request not found' });
+  }
+});
+
+// No-op for old handleMessage logic
+async function handleMessage() {}
 
 async function executeTool(localPath, toolName, args, requestPermission, githubToken = null, branchName = null) {
   const isPathOutside = (targetPath) => {
@@ -451,38 +429,17 @@ async function executeTool(localPath, toolName, args, requestPermission, githubT
       return pushResult;
 
      case 'github_create_pr': {
-       const session = Array.from(clients.entries()).find(([, ws]) => ws.readyState === 1)?.[0];
-       const sess = session ? getSession(session) : null;
-       if (sess) {
-         const remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
-        const match = remoteUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
-        if (match) {
+        // Find session from localPath
+        const sess = getAllSessions().find(s => s.localPath === localPath);
+        if (sess) {
           const { createPullRequest: createPR } = await import('./tools/github.js');
           return createPR(localPath, sess.branchName, args.title, args.body, githubToken);
         }
-      }
       return { error: 'Could not determine repo info' };
     }
 
     default:
       return { error: `Unknown tool: ${toolName}` };
-  }
-}
-
-function send(wsOrSessionId, data) {
-  let ws;
-  if (typeof wsOrSessionId === 'string') {
-    ws = clients.get(wsOrSessionId);
-  } else {
-    ws = wsOrSessionId;
-  }
-
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify(data));
-  } else if (typeof wsOrSessionId === 'string') {
-    // Session is active but client is disconnected.
-    // The data is already saved to history in handleMessage (for 'assistant' role).
-    // We don't need to do anything here as the client will see history on resume.
   }
 }
 
@@ -516,5 +473,4 @@ loadSessionsFromDisk();
 
 server.listen(PORT, () => {
   console.log(`Pocket server running on port ${PORT}`);
-  console.log(`WebSocket available at ws://localhost:${PORT}/ws`);
 });

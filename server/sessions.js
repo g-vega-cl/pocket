@@ -49,6 +49,9 @@ function createSession({ repoUrl, task, isLocal = false, githubToken = null }) {
     branchName: null,
     history: [],
     status: 'created', // created | cloning | cloned | working | done | error
+    isThinking: false,
+    currentToolCall: null,
+    pendingPermission: null,
     createdAt: Date.now(),
     lastActivity: Date.now(),
   };

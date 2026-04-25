@@ -15,6 +15,10 @@ const config = defineConfig({
       host: 'bolt.clvg.uk',
     },
     proxy: {
+      '/api': {
+        target: 'http://localhost:5173',
+        changeOrigin: true,
+      },
       '/ws': {
         target: 'http://localhost:5173',
         ws: true,
