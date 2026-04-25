@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { usePocket } from '#/hooks/usePocket';
-import { PocketApp } from '../routes/pocket';
+import { PocketApp } from '#/components/PocketApp';
 
 vi.mock('#/hooks/usePocket');
 
@@ -42,10 +42,13 @@ describe('PocketApp UI', () => {
       isLoading: false,
       isThinking: false,
       currentToolCall: null,
+      toolLogs: [],
       prUrl: null,
       error: null,
       notification: null,
       pendingPermission: null,
+      lastSyncTime: null,
+      syncing: false,
       createSession: vi.fn(),
       createLocalSession: vi.fn(),
       resumeSession: vi.fn(),
@@ -56,6 +59,7 @@ describe('PocketApp UI', () => {
       sendMessage: vi.fn(),
       commit: vi.fn(),
       createPR: vi.fn(),
+      preSetup: vi.fn(),
       disconnect: vi.fn(),
     };
     mockedUsePocket.mockReturnValue({ ...defaults, ...overrides } as ReturnType<typeof usePocket>);

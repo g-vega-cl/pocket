@@ -144,9 +144,11 @@ app.post('/api/sessions/:sessionId/clone', async (req, res) => {
     const { localPath } = await gitClone(session.repoUrl, session.githubToken);
     updateSession(sessionId, { localPath, status: 'cloned' });
     send(sessionId, { type: 'status', status: 'cloned', message: 'Repository cloned', localPath });
+    console.log(`[Action] Clone completed for session ${sessionId}: ${session.repoUrl} -> ${localPath}`);
   } catch (error) {
     updateSession(sessionId, { status: 'error' });
     send(sessionId, { type: 'error', error: `Clone failed: ${error.message}` });
+    console.log(`[Action] Clone failed for session ${sessionId}: ${error.message}`);
   }
 });
 
@@ -169,9 +171,11 @@ app.post('/api/sessions/:sessionId/create_branch', async (req, res) => {
     await gitPush(session.localPath, branchName, session.githubToken);
     updateSession(sessionId, { branchName, status: 'ready' });
     send(sessionId, { type: 'status', status: 'ready', message: 'Branch created and pushed', branchName });
+    console.log(`[Action] Branch created for session ${sessionId}: ${branchName}`);
   } catch (error) {
     updateSession(sessionId, { status: 'error' });
     send(sessionId, { type: 'error', error: `Branch creation failed: ${error.message}` });
+    console.log(`[Action] Branch creation failed for session ${sessionId}: ${error.message}`);
   }
 });
 
@@ -309,10 +313,12 @@ async function processChat(sessionId, content, model) {
       console.error('Auto-push/PR/Commit failed:', error.message);
     }
     send(sessionId, { type: 'status', status: 'ready', message: 'Ready for more!', prUrl });
+    console.log(`[Action] Chat completed for session ${sessionId}, created PR: ${!!prUrl}`);
   } catch (error) {
     console.error('Chat processing failed:', error);
     updateSession(sessionId, { status: 'error', isThinking: false });
     send(sessionId, { type: 'error', error: error.message });
+    console.log(`[Action] Chat failed for session ${sessionId}: ${error.message}`);
   }
 }
 
@@ -337,11 +343,14 @@ app.post('/api/sessions/:sessionId/commit', async (req, res) => {
       send(sessionId, { type: 'status', status: 'working', message: 'Pushing changes...' });
       await gitPush(session.localPath, session.branchName, session.githubToken);
       send(sessionId, { type: 'status', status: 'ready', message: 'Committed and pushed!' });
+      console.log(`[Action] Commit completed for session ${sessionId}`);
     } else {
       send(sessionId, { type: 'status', status: 'ready', message: 'Committed locally!' });
+      console.log(`[Action] Commit completed for session ${sessionId} (local only)`);
     }
   } catch (error) {
     send(sessionId, { type: 'error', error: error.message });
+    console.log(`[Action] Commit failed for session ${sessionId}: ${error.message}`);
   }
 });
 
@@ -359,11 +368,14 @@ app.post('/api/sessions/:sessionId/create_pr', async (req, res) => {
     if (prResult.prUrl) {
       updateSession(sessionId, { prUrl: prResult.prUrl });
       send(sessionId, { type: 'status', status: 'ready', message: 'PR created!', prUrl: prResult.prUrl });
+      console.log(`[Action] PR created for session ${sessionId}: ${prResult.prUrl}`);
     } else {
       send(sessionId, { type: 'status', status: 'ready', message: 'PR creation failed: ' + prResult.error });
+      console.log(`[Action] PR creation failed for session ${sessionId}: ${prResult.error}`);
     }
   } catch (error) {
     send(sessionId, { type: 'error', error: error.message });
+    console.log(`[Action] PR creation failed for session ${sessionId}: ${error.message}`);
   }
 });
 

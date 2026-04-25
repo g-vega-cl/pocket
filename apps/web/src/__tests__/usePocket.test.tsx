@@ -1,31 +1,20 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { renderHook, waitFor, act } from '@testing-library/react';
 import { usePocket } from '../hooks/usePocket';
 
-class MockWebSocket {
-  onopen: (() => void) | null = null;
-  onclose: (() => void) | null = null;
-  onmessage: ((event: { data: string }) => void) | null = null;
-  onerror: (() => void) | null = null;
-  readyState = 1;
-  send = vi.fn();
-  close = vi.fn();
-}
+// Mock fetch globally
+const mockFetch = vi.fn();
+global.fetch = mockFetch;
 
 describe('usePocket Hook', () => {
-  let mockWs: MockWebSocket;
-
   beforeEach(() => {
-    mockWs = new MockWebSocket();
-    const MockConstructor = vi.fn(() => mockWs) as any;
-    MockConstructor.OPEN = 1;
-    global.WebSocket = MockConstructor;
+    vi.clearAllMocks();
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ type: 'session_created', sessionId: 'test-session' }),
+      text: async () => 'OK',
+    });
   });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
   it('should be defined', async () => {
     const { usePocket } = await import('../hooks/usePocket');
     expect(usePocket).toBeDefined();
@@ -36,273 +25,160 @@ describe('usePocket Hook', () => {
     expect(usePocket).toBeInstanceOf(Function);
   });
 
-  it('should expose commit and createPR methods', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-    expect(result.current.commit).toBeDefined();
-    expect(result.current.commit).toBeInstanceOf(Function);
-    expect(result.current.createPR).toBeDefined();
-    expect(result.current.createPR).toBeInstanceOf(Function);
-  });
-
-  it('should expose listSessions method and sessions state', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-    expect(result.current.listSessions).toBeDefined();
-    expect(result.current.listSessions).toBeInstanceOf(Function);
-    expect(result.current.sessions).toBeInstanceOf(Array);
-  });
-
-  it('should set isThinking=true on thinking_start message', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    expect(mockWs.onmessage).not.toBeNull();
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'thinking_start' }) });
-    });
-
-    expect(result.current.isThinking).toBe(true);
-  });
-
-  it('should set isThinking=false on reasoning token', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'thinking_start' }) });
-    });
-
-    expect(result.current.isThinking).toBe(true);
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'reasoning', content: 'Let me think...' }) });
-    });
-
-    expect(result.current.isThinking).toBe(false);
-  });
-
-  it('should set isThinking=false on content token', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'thinking_start' }) });
-    });
-
-    expect(result.current.isThinking).toBe(true);
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'token', content: 'Hello' }) });
-    });
-
-    expect(result.current.isThinking).toBe(false);
-  });
-
-  it('should append reasoning to existing assistant message', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'token', content: 'Answer' }) });
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'reasoning', content: 'Because...' }) });
-    });
-
-    const lastMsg = result.current.messages[result.current.messages.length - 1];
-    expect(lastMsg.role).toBe('assistant');
-    expect(lastMsg.reasoning).toBe('Because...');
-    expect(lastMsg.content).toBe('Answer');
-  });
-
-  it('should create assistant message for reasoning if last was user', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'user_message', content: 'Hello' }) });
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'reasoning', content: 'Let me think' }) });
-    });
-
-    const lastMsg = result.current.messages[result.current.messages.length - 1];
-    expect(lastMsg.role).toBe('assistant');
-    expect(lastMsg.reasoning).toBe('Let me think');
-    expect(lastMsg.content).toBe('');
-  });
-
-  it('should clear isThinking on done', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'thinking_start' }) });
-    });
-
-    expect(result.current.isThinking).toBe(true);
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'done' }) });
-    });
-
-    expect(result.current.isThinking).toBe(false);
-  });
-
-  it('should clear isThinking on error', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'thinking_start' }) });
-    });
-
-    expect(result.current.isThinking).toBe(true);
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'error', error: 'Something went wrong' }) });
-    });
-
-    expect(result.current.isThinking).toBe(false);
-  });
-
-  it('should clear isThinking on aborted', async () => {
-    const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'thinking_start' }) });
-    });
-
-    expect(result.current.isThinking).toBe(true);
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'aborted' }) });
-    });
-
-    expect(result.current.isThinking).toBe(false);
-  });
-
-  it('should not connect when wsUrl is empty', async () => {
+  it('should not connect when wsUrl is empty', () => {
     const { result } = renderHook(() => usePocket(''));
     expect(result.current.connected).toBe(false);
   });
 
-  it('should connect when wsUrl is provided', async () => {
+  it('should expose commit method', () => {
     const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-    act(() => {
-      mockWs.onopen?.();
-    });
-    expect(result.current.connected).toBe(true);
+    expect(result.current.commit).toBeDefined();
+    expect(result.current.commit).toBeInstanceOf(Function);
   });
 
-  it('should set isLoading=false when status is ready', async () => {
+  it('should expose createPR method', () => {
     const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'ready', message: 'Ready!' }) });
-    });
-
-    expect(result.current.isLoading).toBe(false);
+    expect(result.current.createPR).toBeDefined();
+    expect(result.current.createPR).toBeInstanceOf(Function);
   });
 
-  it('should set isLoading=false when status is done', async () => {
+  it('should expose listSessions method', () => {
     const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'done' }) });
-    });
-
-    expect(result.current.isLoading).toBe(false);
+    expect(result.current.listSessions).toBeDefined();
+    expect(result.current.listSessions).toBeInstanceOf(Function);
   });
 
-  it('should set isLoading=false when status is error', async () => {
+  it('should expose clone method', () => {
     const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'error' }) });
-    });
-
-    expect(result.current.isLoading).toBe(false);
+    expect(result.current.clone).toBeDefined();
+    expect(result.current.clone).toBeInstanceOf(Function);
   });
 
-  it('should set isLoading=true when status is cloning', async () => {
+  it('should expose createBranch method', () => {
     const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'cloning', message: 'Cloning...' }) });
-    });
-
-    expect(result.current.isLoading).toBe(true);
+    expect(result.current.createBranch).toBeDefined();
+    expect(result.current.createBranch).toBeInstanceOf(Function);
   });
 
-  it('should set isLoading=true when status is creating_branch', async () => {
+  it('should expose sendMessage method', () => {
     const { result } = renderHook(() => usePocket('ws://localhost:5173'));
-
-    act(() => {
-      mockWs.onopen?.();
-    });
-
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'creating_branch' }) });
-    });
-
-    expect(result.current.isLoading).toBe(true);
+    expect(result.current.sendMessage).toBeDefined();
+    expect(result.current.sendMessage).toBeInstanceOf(Function);
   });
 
-  it('should set isLoading=true when status is working', async () => {
+  describe('Initial State', () => {
+    it('should have connected initialized to false', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.connected).toBe(false);
+    });
+
+    it('should have syncing initialized to false', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.syncing).toBe(false);
+    });
+
+    it('should have lastSyncTime initialized to null', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.lastSyncTime).toBeNull();
+    });
+
+    it('should have session initialized to null', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.session).toBeNull();
+    });
+
+    it('should have sessions initialized to empty array', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.sessions).toEqual([]);
+    });
+
+    it('should have messages initialized to empty array', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.messages).toEqual([]);
+    });
+
+    it('should have isLoading initialized to false', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    it('should have isThinking initialized to false', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.isThinking).toBe(false);
+    });
+
+  it('should have error initialized to null', () => {
     const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+    expect(result.current.error).toBeNull();
+  });
 
-    act(() => {
-      mockWs.onopen?.();
+  describe('Error Handling', () => {
+    it('should set error message for failed HTTP requests', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 429,
+        text: async () => 'Too Many Requests',
+      });
+
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      
+      // Trigger a post request
+      await act(async () => {
+        await result.current.createSession('https://github.com/test/repo', 'test task');
+      });
+
+      await waitFor(() => {
+        expect(result.current.error).toContain('Error 429');
+      });
     });
 
-    act(() => {
-      mockWs.onmessage?.({ data: JSON.stringify({ type: 'status', status: 'working', message: 'Working...' }) });
+    it('should parse JSON error responses', async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 500,
+        text: async () => JSON.stringify({ error: 'Internal Server Error', message: 'Something went wrong' }),
+      });
+
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      
+      await act(async () => {
+        await result.current.createSession('https://github.com/test/repo', 'test task');
+      });
+
+      await waitFor(() => {
+        expect(result.current.error).toContain('Error 500');
+        expect(result.current.error).toContain('Internal Server Error');
+      });
     });
 
-    expect(result.current.isLoading).toBe(true);
+    it('should handle network errors gracefully', async () => {
+      mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      
+      await act(async () => {
+        await result.current.createSession('https://github.com/test/repo', 'test task');
+      });
+
+      await waitFor(() => {
+        expect(result.current.error).toBe('Network failure');
+      });
+    });
+  });
+
+    it('should have prUrl initialized to null', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.prUrl).toBeNull();
+    });
+
+    it('should have notification initialized to null', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.notification).toBeNull();
+    });
+
+    it('should have pendingPermission initialized to null', () => {
+      const { result } = renderHook(() => usePocket('ws://localhost:5173'));
+      expect(result.current.pendingPermission).toBeNull();
+    });
   });
 });

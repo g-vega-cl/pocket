@@ -43,8 +43,8 @@ If using a Cloudflare Tunnel (e.g., `bolt.clvg.uk`):
 ## Test
 
 ```bash
-pnpm vitest run server/__tests__/          # Server (70 tests)
-cd apps/web && pnpm vitest run src/__tests__/  # Web (17 tests)
+cd server && pnpm test          # Server (75 tests)
+cd apps/web && pnpm test        # Web (21 tests)
 ```
 
 ## Docs

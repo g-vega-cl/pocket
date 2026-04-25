@@ -84,7 +84,7 @@ buildSystemMessage(
 | read_file | tools/file.js | Read repo files |
 | write_file | tools/file.js | Write repo files |
 | run_command | tools/command.js | Execute shell |
-| git_clone | tools/git.js | Clone GitHub repo |
+| git_clone | tools/git.js | Clone GitHub repo (5min timeout) |
 | git_create_branch | tools/git.js | Create branch |
 | git_commit | tools/git.js | Commit changes |
 | git_push | tools/git.js | Push to remote |
@@ -105,6 +105,19 @@ Server → Client: `session_created`, `session_resumed`, `sessions_list`, `statu
 **Note**: `status` messages include a `message` field for feedback (e.g., "Committed and pushed!", "PR created!"). `debug` messages contain raw LLM response data for debugging.
 
 **Loading State**: The frontend derives `isLoading` from status messages. When status is `cloning`, `creating_branch`, or `working`, the UI shows a loading indicator. Terminal states (`ready`, `done`, `error`) clear the loading indicator.
+
+**Error Handling**: 
+- **HTTP Errors**: API requests (e.g., `/api/sessions/:id/chat`) that return non-2xx status codes are caught and displayed with the status code and error message (e.g., `Error 429: Too Many Requests`)
+- **Network Errors**: Failed network requests are caught and displayed with the error message
+- **WebSocket Errors**: Server-sent `error` messages are displayed in the UI with the error text
+
+**Background Sync**: Pocket uses a combination of Server-Sent Events (SSE) and periodic polling to ensure you always see the latest status:
+- **SSE**: Real-time updates from the server
+- **Polling**: Every 10 seconds when a session is active, fetches latest status via REST API
+- **On visibility change**: When returning to the tab, immediately fetches latest status
+- **Visual indicator**: Shows "Syncing" spinner + last sync time
+
+This ensures you never see a "stuck" state - even if SSE events are missed, polling catches up automatically.
 
 **Thinking Flow**: When a `chat` message is sent, the server emits `thinking_start` before the first OpenRouter request. If the model supports reasoning, `reasoning` chunks stream in real time. Once content tokens arrive (`token`), the frontend switches from the generic "Thinking..." indicator to displaying the actual response.
 

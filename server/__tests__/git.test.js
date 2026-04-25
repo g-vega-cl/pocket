@@ -1,8 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { tmpdir } from 'os';
 import { join } from 'path';
 
 const mockExecSync = vi.fn();
+const mockSpawn = vi.fn();
 const mockExistsSync = vi.fn();
 const mockReaddirSync = vi.fn();
 const mockStatSync = vi.fn();
@@ -14,6 +15,7 @@ vi.mock('os', () => ({
 
 vi.mock('child_process', () => ({
   execSync: mockExecSync,
+  spawn: mockSpawn,
 }));
 
 vi.mock('fs', () => ({
@@ -244,6 +246,131 @@ describe('Git Tools', () => {
       await cleanupTempDirs();
 
       expect(mockRmSync).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('gitClone', () => {
+    let consoleErrorSpy;
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      consoleErrorSpy.mockRestore();
+    });
+
+    it('should clone a repository successfully', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockChild = {
+        on: vi.fn((event, callback) => {
+          if (event === 'close') callback(0);
+        }),
+        kill: vi.fn(),
+      };
+      mockSpawn.mockReturnValueOnce(mockChild);
+
+      const { gitClone } = await import('../tools/git.js');
+
+      const result = await gitClone('https://github.com/owner/repo');
+
+      expect(result).toEqual({
+        localPath: expect.stringContaining('owner-repo'),
+        owner: 'owner',
+        repo: 'repo',
+      });
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'git',
+        ['clone', 'https://github.com/owner/repo', expect.stringContaining('owner-repo')],
+        { stdio: 'inherit' }
+      );
+      expect(mockChild.kill).not.toHaveBeenCalled();
+    });
+
+    it('should use authentication token when provided', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockChild = {
+        on: vi.fn((event, callback) => {
+          if (event === 'close') callback(0);
+        }),
+        kill: vi.fn(),
+      };
+      mockSpawn.mockReturnValueOnce(mockChild);
+
+      const { gitClone } = await import('../tools/git.js');
+
+      await gitClone('https://github.com/owner/repo', 'my-token');
+
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'git',
+        ['clone', 'https://my-token@github.com/owner/repo', expect.any(String)],
+        { stdio: 'inherit' }
+      );
+    });
+
+    it('should use GITHUB_TOKEN env var when no token provided', async () => {
+      mockExistsSync.mockReturnValue(false);
+      vi.stubGlobal('process', {
+        ...global.process,
+        env: { ...global.process.env, GITHUB_TOKEN: 'env-token' },
+      });
+
+      const mockChild = {
+        on: vi.fn((event, callback) => {
+          if (event === 'close') callback(0);
+        }),
+        kill: vi.fn(),
+      };
+      mockSpawn.mockReturnValueOnce(mockChild);
+
+      const { gitClone } = await import('../tools/git.js');
+
+      await gitClone('https://github.com/owner/repo');
+
+      expect(mockSpawn).toHaveBeenCalledWith(
+        'git',
+        ['clone', 'https://env-token@github.com/owner/repo', expect.any(String)],
+        { stdio: 'inherit' }
+      );
+    });
+
+    it('should reject when git clone exits with non-zero code', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockChild = {
+        on: vi.fn((event, callback) => {
+          if (event === 'close') callback(1);
+        }),
+        kill: vi.fn(),
+      };
+      mockSpawn.mockReturnValueOnce(mockChild);
+
+      const { gitClone } = await import('../tools/git.js');
+
+      await expect(gitClone('https://github.com/owner/repo')).rejects.toThrow(
+        'git clone exited with code 1'
+      );
+    });
+
+    it('should handle spawn errors', async () => {
+      mockExistsSync.mockReturnValue(false);
+
+      const mockChild = {
+        on: vi.fn((event, callback) => {
+          if (event === 'error') callback(new Error('Spawn error'));
+        }),
+        kill: vi.fn(),
+      };
+      mockSpawn.mockReturnValueOnce(mockChild);
+
+      const { gitClone } = await import('../tools/git.js');
+
+      await expect(gitClone('https://github.com/owner/repo')).rejects.toThrow(
+        'Spawn error'
+      );
     });
   });
 });

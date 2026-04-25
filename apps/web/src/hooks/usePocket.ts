@@ -46,6 +46,8 @@ interface SessionListItem {
 
 interface PocketState {
   connected: boolean;
+  syncing: boolean;
+  lastSyncTime: number | null;
   session: Session | null;
   sessions: SessionListItem[];
   messages: Message[];
@@ -85,6 +87,8 @@ type ServerMessage =
 export function usePocket(wsUrl: string) {
   const [state, setState] = useState<PocketState>({
     connected: false,
+    syncing: false,
+    lastSyncTime: null,
     session: null,
     sessions: [],
     messages: [],
@@ -100,10 +104,20 @@ export function usePocket(wsUrl: string) {
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout>();
+  const pollIntervalRef = useRef<NodeJS.Timeout>();
+  const syncTimeoutRef = useRef<NodeJS.Timeout>();
+  const currentSessionIdRef = useRef<string | null>(null);
+
+  const fetchSessionsRef = useRef<() => void>(() => {});
+  const fetchSessionDataRef = useRef<(sessionId: string, isPolling?: boolean) => void>(() => {});
+  const startPollingRef = useRef<(sessionId: string, intervalMs?: number) => void>(() => {});
 
   const connect = useCallback((sessionId?: string) => {
     if (!wsUrl) return;
     if (eventSourceRef.current) eventSourceRef.current.close();
+
+    currentSessionIdRef.current = sessionId || null;
+    console.log('[SSE] Connecting to:', sessionId ? `session ${sessionId}` : 'global stream');
 
     // In local dev, wsUrl is typically "ws://localhost:3000/ws" (proxied to 5173)
     // We want our API calls to go through the same origin to use the proxy
@@ -117,16 +131,19 @@ export function usePocket(wsUrl: string) {
     const es = new EventSource(eventsUrl);
 
     es.onopen = () => {
+      console.log('[SSE] Connected');
       setState((prev) => ({ ...prev, connected: true, error: null }));
       // Fetch initial data
-      fetchSessions();
+      fetchSessionsRef.current();
       if (sessionId) {
-        fetchSessionData(sessionId);
+        console.log('[SSE] Fetching session data for:', sessionId);
+        fetchSessionDataRef.current(sessionId);
+        startPollingRef.current(sessionId, 10000);
       }
     };
 
     es.onerror = (e) => {
-      console.error('SSE Error:', e);
+      console.error('[SSE] Error:', e);
       setState((prev) => ({ ...prev, connected: false }));
       es.close();
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
@@ -136,9 +153,10 @@ export function usePocket(wsUrl: string) {
     es.onmessage = (event) => {
       try {
         const msg: ServerMessage = JSON.parse(event.data);
+        console.log('[SSE] Message received:', msg.type);
         handleServerMessage(msg);
       } catch (e) {
-        console.error('Failed to parse message:', e);
+        console.error('[SSE] Failed to parse message:', e);
       }
     };
 
@@ -159,19 +177,50 @@ export function usePocket(wsUrl: string) {
     }
   }, [wsUrl]);
 
-  const fetchSessionData = useCallback(async (sessionId: string) => {
+  const fetchSessionData = useCallback(async (sessionId: string, isPolling = false) => {
     const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
     const baseUrl = isLocal ? '' : wsUrl.replace('ws://', 'http://').replace('wss://', 'https://').replace('/ws', '');
     try {
+      if (isPolling) {
+        setState((prev) => ({ ...prev, syncing: true }));
+      }
       const res = await fetch(`${baseUrl}/api/sessions/${sessionId}`);
       const data = await res.json();
+      console.log('[Sync] Fetched session data:', data.type, 'status:', data.session?.status);
       if (data.type === 'session_resumed') {
         handleServerMessage(data);
       }
+      setState((prev) => ({ ...prev, lastSyncTime: Date.now(), syncing: false }));
     } catch (e) {
-      console.error('Failed to fetch session data:', e);
+      console.error('[Sync] Failed to fetch session data:', e);
+      setState((prev) => ({ ...prev, syncing: false }));
     }
   }, [wsUrl]);
+
+  const startPolling = useCallback((sessionId: string, intervalMs = 10000) => {
+    console.log('[Sync] Starting periodic polling for session:', sessionId, 'interval:', intervalMs, 'ms');
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+    pollIntervalRef.current = setInterval(() => {
+      const currentSessionId = new URLSearchParams(window.location.search).get('sessionId');
+      if (currentSessionId) {
+        console.log('[Sync] Periodic poll triggered');
+        fetchSessionData(currentSessionId, true);
+      }
+    }, intervalMs);
+  }, [fetchSessionData]);
+
+  const stopPolling = useCallback(() => {
+    if (pollIntervalRef.current) {
+      console.log('[Sync] Stopping periodic polling');
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+  }, []);
+
+  // Populate refs after callbacks are defined
+  fetchSessionsRef.current = fetchSessions;
+  fetchSessionDataRef.current = fetchSessionData;
+  startPollingRef.current = startPolling;
 
   const handleServerMessage = useCallback((msg: ServerMessage) => {
     switch (msg.type) {
@@ -186,6 +235,7 @@ export function usePocket(wsUrl: string) {
         break;
 
       case 'session_resumed':
+        console.log('[State] Session resumed:', msg.session.status, 'history length:', msg.session.history?.length);
         setState((prev) => ({
           ...prev,
           session: msg.session,
@@ -198,6 +248,7 @@ export function usePocket(wsUrl: string) {
         break;
 
       case 'session_data':
+        console.log('[State] Session data update:', msg.session.status);
         setState((prev) => ({
           ...prev,
           session: msg.session,
@@ -208,6 +259,7 @@ export function usePocket(wsUrl: string) {
         break;
 
       case 'sessions_list':
+        console.log('[State] Sessions list:', msg.sessions.length, 'sessions');
         setState((prev) => ({
           ...prev,
           sessions: msg.sessions,
@@ -215,6 +267,7 @@ export function usePocket(wsUrl: string) {
         break;
 
       case 'status':
+        console.log('[State] Status update:', msg.status, 'message:', msg.message);
         setState((prev) => ({
           ...prev,
           session: prev.session
@@ -375,10 +428,27 @@ export function usePocket(wsUrl: string) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+
+      if (!res.ok) {
+        let errorText = await res.text();
+        try {
+          const json = JSON.parse(errorText);
+          errorText = json.error || json.message || errorText;
+        } catch {
+          // Not JSON, use raw text
+        }
+        const errorMsg = `Error ${res.status}: ${errorText}`;
+        console.error(`Post to ${path} failed:`, errorMsg);
+        setState(prev => ({ ...prev, error: errorMsg }));
+        return { error: errorMsg, status: res.status };
+      }
+
       return await res.json();
     } catch (e) {
       console.error(`Post to ${path} failed:`, e);
-      setState(prev => ({ ...prev, error: 'Request failed' }));
+      const errorMsg = e instanceof Error ? e.message : 'Request failed';
+      setState(prev => ({ ...prev, error: errorMsg }));
+      return { error: errorMsg };
     }
   }, [wsUrl]);
 
@@ -457,16 +527,30 @@ export function usePocket(wsUrl: string) {
 
   const clone = useCallback(
     (sessionId: string) => {
-      post(`/api/sessions/${sessionId}/clone`, {});
+      console.log('[Action] Clone started for session:', sessionId);
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
+      // Ensure polling is active during long-running operation
+      startPolling(sessionId, 10000);
+      post(`/api/sessions/${sessionId}/clone`, {}).catch((e) => {
+        console.error('[Action] Clone failed:', e);
+        setState((prev) => ({ ...prev, isLoading: false, error: e.message || 'Clone failed' }));
+      });
     },
-    [post]
+    [post, startPolling]
   );
 
   const createBranch = useCallback(
     (sessionId: string) => {
-      post(`/api/sessions/${sessionId}/create_branch`, {});
+      console.log('[Action] Create branch started for session:', sessionId);
+      setState((prev) => ({ ...prev, isLoading: true, error: null }));
+      // Ensure polling is active during long-running operation
+      startPolling(sessionId, 10000);
+      post(`/api/sessions/${sessionId}/create_branch`, {}).catch((e) => {
+        console.error('[Action] Create branch failed:', e);
+        setState((prev) => ({ ...prev, isLoading: false, error: e.message || 'Branch creation failed' }));
+      });
     },
-    [post]
+    [post, startPolling]
   );
 
   const sendMessage = useCallback(
@@ -477,11 +561,19 @@ export function usePocket(wsUrl: string) {
     [post]
   );
 
-  const disconnect = useCallback(() => {
-    clearTimeout(reconnectTimeoutRef.current);
-    eventSourceRef.current?.close();
-    eventSourceRef.current = null;
-  }, []);
+const disconnect = useCallback(() => {
+    console.log('[SSE] Disconnecting');
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+      eventSourceRef.current = null;
+    }
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = undefined;
+    }
+    stopPolling();
+    setState((prev) => ({ ...prev, connected: false }));
+  }, [stopPolling]);
 
   const commit = useCallback(
     (sessionId: string) => {
@@ -509,17 +601,31 @@ export function usePocket(wsUrl: string) {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        console.log('[Visibility] Tab became visible, fetching latest status');
         const currentSessionId = new URLSearchParams(window.location.search).get('sessionId');
+        if (currentSessionId) {
+          // Immediately fetch latest status when tab becomes visible
+          fetchSessionData(currentSessionId, true);
+          // Restart polling if not already running
+          startPolling(currentSessionId, 10000);
+        }
         connect(currentSessionId || undefined);
+      } else {
+        console.log('[Visibility] Tab hidden');
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
+
     return () => {
+      console.log('[Effect] Cleaning up usePocket');
       disconnect();
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
+      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
+      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current);
     };
-  }, [connect, disconnect, wsUrl]);
+  }, [connect, disconnect, wsUrl, fetchSessionData, startPolling]);
 
   return {
     ...state,

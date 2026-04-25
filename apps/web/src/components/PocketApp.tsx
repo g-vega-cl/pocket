@@ -14,6 +14,8 @@ export function PocketApp() {
 
   const {
     connected,
+    syncing,
+    lastSyncTime,
     session,
     sessions,
     messages,
@@ -281,6 +283,20 @@ export function PocketApp() {
           >
             {getStatusMessage(session?.status || 'created')}
           </span>
+          {syncing && (
+            <span className="flex items-center gap-1 px-2 py-1 rounded-full text-xs bg-blue-100 text-blue-800">
+              <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              Syncing
+            </span>
+          )}
+          {lastSyncTime && !syncing && (
+            <span className="text-xs text-gray-400" title="Last synced">
+              Synced {new Date(lastSyncTime).toLocaleTimeString()}
+            </span>
+          )}
         </div>
 
         {notification && (
@@ -360,7 +376,13 @@ export function PocketApp() {
 
         {error && (
           <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
-            {error}
+            <div className="flex items-center gap-2 mb-1">
+              <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <span className="font-medium">Error:</span>
+            </div>
+            <pre className="whitespace-pre-wrap font-mono text-xs mt-1">{error}</pre>
           </div>
         )}
 

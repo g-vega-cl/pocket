@@ -1,4 +1,4 @@
-import { execSync, exec } from 'child_process';
+import { execSync, exec, spawn } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync, rmSync } from 'fs';
 import { join } from 'path';
 import { randomUUID } from 'crypto';
@@ -50,7 +50,7 @@ function slugify(text) {
     .substring(0, 50);
 }
 
-async function gitClone(repoUrl, token = process.env.GITHUB_TOKEN) {
+async function gitClone(repoUrl, token = process.env.GITHUB_TOKEN, timeoutMs = 300000) {
   ensureTempDir();
   const { owner, repo } = parseRepoInfo(repoUrl);
   const destName = `${owner}-${repo}-${randomUUID().substring(0, 8)}`;
@@ -66,9 +66,29 @@ async function gitClone(repoUrl, token = process.env.GITHUB_TOKEN) {
     authenticatedUrl = repoUrl.replace('https://github.com', `https://${effectiveToken}@github.com`);
   }
 
-  execSync(`git clone ${authenticatedUrl} ${localPath}`, { stdio: 'inherit' });
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const git = spawn('git', ['clone', authenticatedUrl, localPath], { stdio: 'inherit' });
 
-  return { localPath, owner, repo };
+    const timeout = setTimeout(() => {
+      git.kill();
+      reject(new Error(`Clone timed out after ${timeoutMs / 1000}s`));
+    }, timeoutMs);
+
+    git.on('close', (code) => {
+      clearTimeout(timeout);
+      if (code === 0) {
+        resolve({ localPath, owner, repo });
+      } else {
+        reject(new Error(`git clone exited with code ${code}`));
+      }
+    });
+
+    git.on('error', (err) => {
+      clearTimeout(timeout);
+      reject(err);
+    });
+  });
 }
 
 async function gitInit() {
