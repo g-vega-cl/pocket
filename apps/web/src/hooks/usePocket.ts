@@ -14,6 +14,7 @@ export interface Message {
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string;
   reasoning?: string;
+  timestamp?: number;
 }
 
 export interface Session {

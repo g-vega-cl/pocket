@@ -421,8 +421,15 @@ export function PocketApp() {
               );
             }
             return (
+            <div key={i} className="space-y-1">
+              <div className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                {msg.timestamp && (
+                  <span className="text-[10px] text-gray-400 px-2">
+                    {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+              </div>
             <div
-              key={i}
               className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
@@ -442,6 +449,7 @@ export function PocketApp() {
                 )}
                 <pre className="whitespace-pre-wrap font-sans text-sm">{msg.content}</pre>
               </div>
+            </div>
             </div>
           );})}
 

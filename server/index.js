@@ -231,7 +231,12 @@ async function handleMessage(ws, message) {
 const repoName = session.repoUrl.split('/').pop().replace('.git', '');
       const messages = [
         buildSystemMessage(session.branchName, session.task, repoName, session.localPath),
-        ...session.history.map(m => ({ role: m.role, content: m.content })),
+        ...session.history.map(m => {
+          const msg = { role: m.role, content: m.content };
+          if (m.tool_calls) msg.tool_calls = m.tool_calls;
+          if (m.tool_call_id) msg.tool_call_id = m.tool_call_id;
+          return msg;
+        }),
       ];
 
       let fullResponse = '';
@@ -251,7 +256,14 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
             updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments }, isThinking: false });
             send(sessionId, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
           } else if (toolCall.status === 'complete') {
-            // Tool call streaming complete - waiting for execution
+            // Tool call streaming complete - update history with tool_calls
+            updateLastHistoryMessage(sessionId, fullResponse, fullReasoning, [
+               {
+                 id: toolCall.id || `call_${Date.now()}`,
+                 type: 'function',
+                 function: { name: toolCall.name, arguments: JSON.stringify(toolCall.arguments) }
+               }
+            ]);
           } else if (toolCall.status === 'result') {
             updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments, result: toolCall.result }, isThinking: true });
             // Tool execution result from llm.js
@@ -262,7 +274,8 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
               content: JSON.stringify(toolCall.result),
               tool_call: toolCall.name,
               tool_args: toolCall.arguments,
-              tool_result: toolCall.result
+              tool_result: toolCall.result,
+              tool_call_id: toolCall.id || `call_${Date.now()}`
             });
           }
         },
