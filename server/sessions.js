@@ -57,6 +57,19 @@ function createSession({ repoUrl, task, isLocal = false, githubToken = null }) {
   return session;
 }
 
+function updateLastHistoryMessage(id, content, reasoning = null) {
+  const session = sessions.get(id);
+  if (!session || session.history.length === 0) return null;
+  const last = session.history[session.history.length - 1];
+  if (last.role === 'assistant') {
+    last.content = content;
+    if (reasoning !== null) last.reasoning = reasoning;
+    session.lastActivity = Date.now();
+    saveSessionToDisk(session);
+  }
+  return session;
+}
+
 function getSession(id) {
   return sessions.get(id);
 }
@@ -107,5 +120,6 @@ export {
   getAllSessions,
   updateSession,
   addToHistory,
+  updateLastHistoryMessage,
   loadSessionsFromDisk,
 };

@@ -5,7 +5,7 @@ import { WebSocketServer } from 'ws';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { createSession, getSession, getAllSessions, updateSession, addToHistory, loadSessionsFromDisk } from './sessions.js';
+import { createSession, getSession, getAllSessions, updateSession, addToHistory, updateLastHistoryMessage, loadSessionsFromDisk } from './sessions.js';
 import { gitClone, gitInit, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
 import { readFile, writeFile } from './tools/file.js';
 import { runCommand } from './tools/command.js';
@@ -235,19 +235,25 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
       ];
 
       let fullResponse = '';
+      let fullReasoning = '';
+
+      addToHistory(sessionId, { role: 'assistant', content: '', reasoning: '' });
 
       await streamChat(
         messages,
         (chunk) => {
           fullResponse += chunk;
+          updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
           send(sessionId, { type: 'token', content: chunk });
         },
         async (toolCall) => {
           if (toolCall.status === 'start') {
+            updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments }, isThinking: false });
             send(sessionId, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
           } else if (toolCall.status === 'complete') {
             // Tool call streaming complete - waiting for execution
           } else if (toolCall.status === 'result') {
+            updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments, result: toolCall.result }, isThinking: true });
             // Tool execution result from llm.js
             send(sessionId, { type: 'tool_result', tool: toolCall.name, result: toolCall.result });
             // SAVE TOOL RESULT TO HISTORY
@@ -271,12 +277,19 @@ const repoName = session.repoUrl.split('/').pop().replace('.git', '');
           return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
         },
         (raw) => send(sessionId, { type: 'debug', data: raw }),
-        () => send(sessionId, { type: 'thinking_start' }),
-        (chunk) => send(sessionId, { type: 'reasoning', content: chunk }),
+        () => {
+           updateSession(sessionId, { isThinking: true });
+           send(sessionId, { type: 'thinking_start' });
+        },
+        (chunk) => {
+          fullReasoning += chunk;
+          updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
+          send(sessionId, { type: 'reasoning', content: chunk });
+        },
         model
       );
 
-      addToHistory(sessionId, { role: 'assistant', content: fullResponse });
+      updateSession(sessionId, { isThinking: false, currentToolCall: null });
 
       let prUrl = null;
       try {

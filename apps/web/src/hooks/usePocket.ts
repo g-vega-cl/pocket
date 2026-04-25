@@ -25,6 +25,8 @@ export interface Session {
   branchName: string | null;
   history: Message[];
   status: SessionStatus;
+  isThinking?: boolean;
+  currentToolCall?: ToolCall | null;
 }
 
 export interface ToolCall {
@@ -146,7 +148,9 @@ export function usePocket(wsUrl: string) {
           ...prev,
           session: msg.session,
           messages: msg.session.history,
-          isLoading: false,
+          isThinking: msg.session.isThinking ?? false,
+          currentToolCall: msg.session.currentToolCall ?? null,
+          isLoading: msg.session.status === 'working' || (msg.session.isThinking ?? false) || !!msg.session.currentToolCall,
         }));
         break;
 
@@ -155,6 +159,8 @@ export function usePocket(wsUrl: string) {
           ...prev,
           session: msg.session,
           messages: msg.session.history,
+          isThinking: msg.session.isThinking ?? prev.isThinking,
+          currentToolCall: msg.session.currentToolCall ?? prev.currentToolCall,
         }));
         break;
 

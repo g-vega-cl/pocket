@@ -404,7 +404,22 @@ export function PocketApp() {
           )}
 
           {messages.map((msg, i) => {
-            if (msg.role === 'tool') return null; // We already show current tool call, and history is for LLM. Or we can show it collapsed.
+            if (msg.role === 'tool') {
+              return (
+                <div key={i} className="flex justify-start opacity-60 hover:opacity-100 transition-opacity">
+                  <div className="max-w-[90%] w-full rounded-xl px-4 py-1 bg-gray-100 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 text-xs">
+                    <details>
+                      <summary className="cursor-pointer font-mono py-1">
+                        Tool Result
+                      </summary>
+                      <pre className="p-2 bg-black/5 rounded overflow-x-auto max-h-40 overflow-y-auto mt-1 font-mono">
+                        {msg.content}
+                      </pre>
+                    </details>
+                  </div>
+                </div>
+              );
+            }
             return (
             <div
               key={i}
