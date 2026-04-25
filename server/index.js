@@ -4,7 +4,7 @@ import { createServer } from 'http';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { EventEmitter } from 'events';
+
 import { createSession, getSession, getAllSessions, updateSession, addToHistory, updateLastHistoryMessage, loadSessionsFromDisk } from './sessions.js';
 import { gitClone, gitInit, gitCreateBranch, gitCommit, gitPush, gitStatus } from './tools/git.js';
 import { readFile, writeFile } from './tools/file.js';
@@ -24,59 +24,7 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 5173;
 
-const sessionEvents = new EventEmitter();
 const pendingPermissions = new Map();
-
-function send(sessionId, data) {
-  sessionEvents.emit(`event:${sessionId}`, data);
-  // Also emit a general event for session list updates if needed
-  if (data.type === 'sessions_list' || data.type === 'session_created') {
-    sessionEvents.emit('sessions_update', data);
-  }
-}
-
-function broadcastSessionList() {
-  const sessions = getAllSessions().map(s => ({
-    id: s.id,
-    repoUrl: s.repoUrl,
-    task: s.task,
-    createdAt: s.createdAt,
-    status: s.status,
-  }));
-  sessionEvents.emit('sessions_update', { type: 'sessions_list', sessions });
-}
-
-// SSE Endpoint
-app.get('/api/sessions/:sessionId/events', (req, res) => {
-  const { sessionId } = req.params;
-
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
-  res.flushHeaders();
-
-  const onEvent = (data) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  };
-
-  const onSessionsUpdate = (data) => {
-    res.write(`data: ${JSON.stringify(data)}\n\n`);
-  }
-
-  sessionEvents.on(`event:${sessionId}`, onEvent);
-  sessionEvents.on('sessions_update', onSessionsUpdate);
-
-  // Heartbeat
-  const heartbeat = setInterval(() => {
-    res.write(': keep-alive\n\n');
-  }, 15000);
-
-  req.on('close', () => {
-    clearInterval(heartbeat);
-    sessionEvents.removeListener(`event:${sessionId}`, onEvent);
-    sessionEvents.removeListener('sessions_update', onSessionsUpdate);
-  });
-});
 
 // GET /api/sessions
 app.get('/api/sessions', (req, res) => {
@@ -95,7 +43,7 @@ app.post('/api/sessions', (req, res) => {
   const { repoUrl, task, githubToken } = req.body;
   const session = createSession({ repoUrl, task, githubToken });
   console.log(`[Session] Created session ${session.id} for repo ${repoUrl}`);
-  broadcastSessionList();
+
   res.json({ type: 'session_created', sessionId: session.id });
 });
 
@@ -106,16 +54,16 @@ app.post('/api/sessions/local', async (req, res) => {
   console.log(`[Session] Created local session ${session.id}`);
 
   res.json({ type: 'session_created', sessionId: session.id });
-  broadcastSessionList();
+
 
   // Automatically initialize local session in background
   try {
     const { localPath } = await gitInit();
     updateSession(session.id, { localPath, status: 'ready', branchName: 'main' });
-    send(session.id, { type: 'status', status: 'ready', message: 'Local session ready', localPath, branchName: 'main' });
+
   } catch (error) {
     updateSession(session.id, { status: 'error' });
-    send(session.id, { type: 'error', error: `Local initialization failed: ${error.message}` });
+
   }
 });
 
@@ -136,18 +84,18 @@ app.post('/api/sessions/:sessionId/clone', async (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found' });
 
   updateSession(sessionId, { status: 'cloning' });
-  send(sessionId, { type: 'status', status: 'cloning', message: 'Cloning repository...' });
+
 
   res.json({ status: 'started' });
 
   try {
     const { localPath } = await gitClone(session.repoUrl, session.githubToken);
     updateSession(sessionId, { localPath, status: 'cloned' });
-    send(sessionId, { type: 'status', status: 'cloned', message: 'Repository cloned', localPath });
+
     console.log(`[Action] Clone completed for session ${sessionId}: ${session.repoUrl} -> ${localPath}`);
   } catch (error) {
     updateSession(sessionId, { status: 'error' });
-    send(sessionId, { type: 'error', error: `Clone failed: ${error.message}` });
+
     console.log(`[Action] Clone failed for session ${sessionId}: ${error.message}`);
   }
 });
@@ -161,20 +109,20 @@ app.post('/api/sessions/:sessionId/create_branch', async (req, res) => {
   if (!session.localPath) return res.status(400).json({ error: 'Repository not cloned yet' });
 
   updateSession(sessionId, { status: 'creating_branch' });
-  send(sessionId, { type: 'status', status: 'creating_branch', message: 'Creating branch...' });
+
 
   res.json({ status: 'started' });
 
   try {
     const { branchName } = await gitCreateBranch(session.localPath, session.task);
-    send(sessionId, { type: 'status', status: 'creating_branch', message: 'Pushing branch to origin...' });
+
     await gitPush(session.localPath, branchName, session.githubToken);
     updateSession(sessionId, { branchName, status: 'ready' });
-    send(sessionId, { type: 'status', status: 'ready', message: 'Branch created and pushed', branchName });
+
     console.log(`[Action] Branch created for session ${sessionId}: ${branchName}`);
   } catch (error) {
     updateSession(sessionId, { status: 'error' });
-    send(sessionId, { type: 'error', error: `Branch creation failed: ${error.message}` });
+
     console.log(`[Action] Branch creation failed for session ${sessionId}: ${error.message}`);
   }
 });
@@ -201,7 +149,7 @@ app.post('/api/sessions/:sessionId/chat', async (req, res) => {
   addToHistory(sessionId, userMessage);
 
   // Broadcast user message to other potential clients
-  send(sessionId, { type: 'user_message', content: chatContent });
+
 
   // Respond immediately that we received it
   res.json({ status: 'processing' });
@@ -234,12 +182,12 @@ async function processChat(sessionId, content, model) {
       (chunk) => {
         fullResponse += chunk;
         updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
-        send(sessionId, { type: 'token', content: chunk });
+
       },
       async (toolCall) => {
         if (toolCall.status === 'start') {
           updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments }, isThinking: false });
-          send(sessionId, { type: 'tool_start', tool: toolCall.name, args: toolCall.arguments });
+
         } else if (toolCall.status === 'complete') {
           updateLastHistoryMessage(sessionId, fullResponse, fullReasoning, [
              {
@@ -250,7 +198,7 @@ async function processChat(sessionId, content, model) {
           ]);
         } else if (toolCall.status === 'result') {
           updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments, result: toolCall.result }, isThinking: true });
-          send(sessionId, { type: 'tool_result', tool: toolCall.name, result: toolCall.result });
+
           addToHistory(sessionId, {
             role: 'tool',
             content: JSON.stringify(toolCall.result),
@@ -269,7 +217,7 @@ async function processChat(sessionId, content, model) {
           const pendingPermission = { requestId, tool: toolName, args, reason };
           updateSession(sessionId, { pendingPermission });
 
-          send(sessionId, { type: 'permission_request', ...pendingPermission });
+
 
           return new Promise((resolve) => {
             pendingPermissions.set(requestId, resolve);
@@ -277,15 +225,15 @@ async function processChat(sessionId, content, model) {
         };
         return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
       },
-      (raw) => send(sessionId, { type: 'debug', data: raw }),
+
       () => {
          updateSession(sessionId, { isThinking: true });
-         send(sessionId, { type: 'thinking_start' });
+
       },
       (chunk) => {
         fullReasoning += chunk;
         updateLastHistoryMessage(sessionId, fullResponse, fullReasoning);
-        send(sessionId, { type: 'reasoning', content: chunk });
+
       },
       model
     );
@@ -297,13 +245,13 @@ async function processChat(sessionId, content, model) {
     try {
       const { dirty } = await gitStatus(session.localPath);
       if (dirty) {
-        send(sessionId, { type: 'status', status: 'working', message: 'Committing changes...' });
+
         await gitCommit(session.localPath, `Pocket: ${session.task}`);
 
         if (!session.isLocal) {
-          send(sessionId, { type: 'status', status: 'working', message: 'Pushing changes...' });
+
           await gitPush(session.localPath, session.branchName, session.githubToken);
-          send(sessionId, { type: 'status', status: 'working', message: 'Creating pull request...' });
+
           const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}\n\n${fullResponse.slice(0, 500)}`, session.githubToken);
           prUrl = prResult.prUrl;
           if (prUrl) updateSession(sessionId, { prUrl });
@@ -312,12 +260,12 @@ async function processChat(sessionId, content, model) {
     } catch (error) {
       console.error('Auto-push/PR/Commit failed:', error.message);
     }
-    send(sessionId, { type: 'status', status: 'ready', message: 'Ready for more!', prUrl });
+
     console.log(`[Action] Chat completed for session ${sessionId}, created PR: ${!!prUrl}`);
   } catch (error) {
     console.error('Chat processing failed:', error);
     updateSession(sessionId, { status: 'error', isThinking: false });
-    send(sessionId, { type: 'error', error: error.message });
+
     console.log(`[Action] Chat failed for session ${sessionId}: ${error.message}`);
   }
 }
@@ -333,23 +281,23 @@ app.post('/api/sessions/:sessionId/commit', async (req, res) => {
   try {
     const { dirty } = await gitStatus(session.localPath);
     if (!dirty) {
-      send(sessionId, { type: 'status', status: 'ready', message: 'No changes to commit' });
+
       return;
     }
 
-    send(sessionId, { type: 'status', status: 'working', message: 'Committing changes...' });
+
     await gitCommit(session.localPath, `Pocket: ${session.task}`);
     if (!session.isLocal) {
-      send(sessionId, { type: 'status', status: 'working', message: 'Pushing changes...' });
+
       await gitPush(session.localPath, session.branchName, session.githubToken);
-      send(sessionId, { type: 'status', status: 'ready', message: 'Committed and pushed!' });
+
       console.log(`[Action] Commit completed for session ${sessionId}`);
     } else {
-      send(sessionId, { type: 'status', status: 'ready', message: 'Committed locally!' });
+
       console.log(`[Action] Commit completed for session ${sessionId} (local only)`);
     }
   } catch (error) {
-    send(sessionId, { type: 'error', error: error.message });
+
     console.log(`[Action] Commit failed for session ${sessionId}: ${error.message}`);
   }
 });
@@ -363,18 +311,18 @@ app.post('/api/sessions/:sessionId/create_pr', async (req, res) => {
   res.json({ status: 'started' });
 
   try {
-    send(sessionId, { type: 'status', status: 'working', message: 'Creating pull request...' });
+
     const prResult = await createPullRequest(session.localPath, session.branchName, `Pocket: ${session.task}`, `Task: ${session.task}`, session.githubToken);
     if (prResult.prUrl) {
       updateSession(sessionId, { prUrl: prResult.prUrl });
-      send(sessionId, { type: 'status', status: 'ready', message: 'PR created!', prUrl: prResult.prUrl });
+
       console.log(`[Action] PR created for session ${sessionId}: ${prResult.prUrl}`);
     } else {
-      send(sessionId, { type: 'status', status: 'ready', message: 'PR creation failed: ' + prResult.error });
+
       console.log(`[Action] PR creation failed for session ${sessionId}: ${prResult.error}`);
     }
   } catch (error) {
-    send(sessionId, { type: 'error', error: error.message });
+
     console.log(`[Action] PR creation failed for session ${sessionId}: ${error.message}`);
   }
 });

@@ -28,6 +28,12 @@ export interface Session {
   status: SessionStatus
   isThinking?: boolean
   currentToolCall?: ToolCall | null
+  pendingPermission?: {
+    requestId: string
+    tool: string
+    args: Record<string, unknown>
+    reason: string
+  } | null
 }
 
 export interface ToolCall {
@@ -116,10 +122,9 @@ export function usePocket(wsUrl: string) {
     pendingPermission: null,
   })
 
-  const eventSourceRef = useRef<EventSource | null>(null)
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout>()
-  const pollIntervalRef = useRef<NodeJS.Timeout>()
-  const syncTimeoutRef = useRef<NodeJS.Timeout>()
+
+  const pollIntervalRef = useRef<NodeJS.Timeout | undefined>(undefined)
+  const syncTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
   const currentSessionIdRef = useRef<string | null>(null)
 
   const fetchSessionsRef = useRef<() => void>(() => {})
@@ -131,73 +136,42 @@ export function usePocket(wsUrl: string) {
   >(() => {})
 
   const connect = useCallback(
-    (sessionId?: string) => {
+    async (sessionId?: string) => {
       if (!wsUrl) return
-      if (eventSourceRef.current) eventSourceRef.current.close()
 
       currentSessionIdRef.current = sessionId || null
 
-      // Only connect to SSE if we have a session ID
+      // Only start polling if we have a session ID
       if (!sessionId) {
-        console.log('[SSE] No session ID, using polling for sessions list')
+        console.log('[Poll] No session ID, using polling for sessions list')
         // Fetch sessions list via polling when no session is selected
         fetchSessionsRef.current()
         setState((prev) => ({ ...prev, isConnecting: false }))
         return
       }
 
-      console.log('[SSE] Connecting to session:', sessionId)
-      setState((prev) => ({ ...prev, isConnecting: true }))
+      console.log('[Poll] Connecting to session:', sessionId)
+      setState((prev) => ({ ...prev, isConnecting: true, error: null }))
 
-      // In local dev, wsUrl is typically "ws://localhost:3000/ws" (proxied to 5173)
-      // We want our API calls to go through the same origin to use the proxy
-      const isLocal =
-        window.location.hostname === 'localhost' ||
-        window.location.hostname === '127.0.0.1'
-      const baseUrl = isLocal
-        ? ''
-        : wsUrl
-            .replace('ws://', 'http://')
-            .replace('wss://', 'https://')
-            .replace('/ws', '')
-
-      const eventsUrl = `${baseUrl}/api/sessions/${sessionId}/events`
-
-      const es = new EventSource(eventsUrl)
-
-      es.onopen = () => {
-        console.log('[SSE] Connected to session:', sessionId)
+      // Fetch initial data and start polling
+      try {
+        console.log('[Poll] About to fetch session data')
+        await fetchSessionDataRef.current(sessionId)
+        console.log('[Poll] Session data fetched successfully')
+        startPollingRef.current(sessionId, 5000) // 5 second interval
         setState((prev) => ({
           ...prev,
           connected: true,
           isConnecting: false,
-          error: null,
         }))
-        // Fetch initial data
-        fetchSessionDataRef.current(sessionId)
-        startPollingRef.current(sessionId, 10000)
+      } catch (e) {
+        console.error('[Poll] Failed to connect:', e)
+        setState((prev) => ({
+          ...prev,
+          connected: false,
+          isConnecting: false,
+        }))
       }
-
-      es.onerror = (e) => {
-        console.error('[SSE] Error:', e)
-        setState((prev) => ({ ...prev, connected: false, isConnecting: false }))
-        es.close()
-        if (reconnectTimeoutRef.current)
-          clearTimeout(reconnectTimeoutRef.current)
-        reconnectTimeoutRef.current = setTimeout(() => connect(sessionId), 2000)
-      }
-
-      es.onmessage = (event) => {
-        try {
-          const msg: ServerMessage = JSON.parse(event.data)
-          console.log('[SSE] Message received:', msg.type)
-          handleServerMessage(msg)
-        } catch (e) {
-          console.error('[SSE] Failed to parse message:', e)
-        }
-      }
-
-      eventSourceRef.current = es
     },
     [wsUrl],
   )
@@ -254,9 +228,13 @@ export function usePocket(wsUrl: string) {
           setState((prev) => ({ ...prev, syncing: true }))
         }
         const res = await fetch(`${baseUrl}/api/sessions/${sessionId}`)
+        if (!res.ok) {
+          const errorText = await res.text()
+          throw new Error(`HTTP ${res.status}: ${errorText}`)
+        }
         const data = await res.json()
         console.log(
-          '[Sync] Fetched session data:',
+          '[Poll] Fetched session data:',
           data.type,
           'status:',
           data.session?.status,
@@ -270,29 +248,30 @@ export function usePocket(wsUrl: string) {
           syncing: false,
         }))
       } catch (e) {
-        console.error('[Sync] Failed to fetch session data:', e)
+        console.error('[Poll] Failed to fetch session data:', e)
         setState((prev) => ({ ...prev, syncing: false }))
+        throw e // Re-throw to allow caller to handle
       }
     },
     [wsUrl],
   )
 
   const startPolling = useCallback(
-    (sessionId: string, intervalMs = 10000) => {
+    (sessionId: string, intervalMs = 5000) => {
       console.log(
-        '[Sync] Starting periodic polling for session:',
+        '[Poll] Starting periodic polling for session:',
         sessionId,
         'interval:',
         intervalMs,
         'ms',
       )
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
+      clearInterval(pollIntervalRef.current)
       pollIntervalRef.current = setInterval(() => {
         const currentSessionId = new URLSearchParams(
           window.location.search,
         ).get('sessionId')
         if (currentSessionId) {
-          console.log('[Sync] Periodic poll triggered')
+          console.log('[Poll] Periodic poll triggered')
           fetchSessionData(currentSessionId, true)
         }
       }, intervalMs)
@@ -301,11 +280,9 @@ export function usePocket(wsUrl: string) {
   )
 
   const stopPolling = useCallback(() => {
-    if (pollIntervalRef.current) {
-      console.log('[Sync] Stopping periodic polling')
-      clearInterval(pollIntervalRef.current)
-      pollIntervalRef.current = null
-    }
+    console.log('[Poll] Stopping periodic polling')
+    clearInterval(pollIntervalRef.current)
+    pollIntervalRef.current = undefined
   }, [])
 
   // Populate refs after callbacks are defined
@@ -332,7 +309,7 @@ export function usePocket(wsUrl: string) {
           '[State] Session resumed:',
           msg.session.status,
           'history length:',
-          msg.session.history?.length,
+          msg.session.history.length,
         )
         setState((prev) => ({
           ...prev,
@@ -698,15 +675,7 @@ export function usePocket(wsUrl: string) {
   )
 
   const disconnect = useCallback(() => {
-    console.log('[SSE] Disconnecting')
-    if (eventSourceRef.current) {
-      eventSourceRef.current.close()
-      eventSourceRef.current = null
-    }
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current)
-      reconnectTimeoutRef.current = undefined
-    }
+    console.log('[Poll] Disconnecting')
     stopPolling()
     setState((prev) => ({ ...prev, connected: false, isConnecting: false }))
   }, [stopPolling])
@@ -759,9 +728,8 @@ export function usePocket(wsUrl: string) {
       console.log('[Effect] Cleaning up usePocket')
       disconnect()
       document.removeEventListener('visibilitychange', handleVisibilityChange)
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current)
-      if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current)
-      if (syncTimeoutRef.current) clearTimeout(syncTimeoutRef.current)
+      clearInterval(pollIntervalRef.current)
+      clearTimeout(syncTimeoutRef.current)
     }
   }, [connect, disconnect, wsUrl, fetchSessionData, startPolling])
 
