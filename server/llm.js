@@ -1,6 +1,6 @@
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
-const DEFAULT_MODEL = 'deepseek/deepseek-v4-flash';
+const DEFAULT_MODEL = 'xiaomi/mimo-v2-flash';
 
 const SYSTEM_PROMPT = `You are Pocket, an autonomous coding agent.
 
