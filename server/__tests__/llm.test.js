@@ -301,6 +301,60 @@ describe('LLM Client', () => {
       expect(fetchCallCount).toBe(2);
     });
 
+    it('should handle malformed JSON in tool arguments and return error result', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const toolCalls = [];
+      let fetchCallCount = 0;
+
+      global.fetch = vi.fn().mockImplementation(() => {
+        const currentFetch = fetchCallCount++;
+        const mockGetReader = () => {
+          let readCount = 0;
+          return {
+            read: async () => {
+              readCount++;
+              if (currentFetch === 0) {
+                if (readCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"read_file","arguments":"{invalid json}"},"id":"call_123"}]}}]}\n'),
+                  };
+                }
+                if (readCount === 2) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"finish_reason":"tool_calls"}]}\n'),
+                  };
+                }
+              }
+              return { done: true, value: new Uint8Array() };
+            },
+          };
+        };
+        return Promise.resolve({
+          ok: true,
+          body: { getReader: mockGetReader },
+        });
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Read the file' }],
+        () => {},
+        (toolCall) => toolCalls.push(toolCall),
+        async () => ({ success: true })
+      );
+
+      // Should have attempted to execute the tool and returned error result
+      const errorResult = toolCalls.find(t => t.status === 'result' && t.result?.error);
+      expect(errorResult).toBeDefined();
+      expect(errorResult.name).toBe('read_file');
+      expect(errorResult.result.error).toContain('malformed JSON');
+      
+      // Should have made 2 requests: one for the tool call, one for the error result
+      expect(fetchCallCount).toBe(2);
+    });
+
     it('should call onStartTurn before each API request', async () => {
       const { streamChat } = await import('../llm.js');
 

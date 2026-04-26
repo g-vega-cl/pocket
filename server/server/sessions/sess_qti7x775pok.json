@@ -1,0 +1,26 @@
+{
+  "id": "sess_qti7x775pok",
+  "repoUrl": "https://github.com/test/repo",
+  "task": "Test task",
+  "isLocal": false,
+  "localPath": null,
+  "branchName": null,
+  "history": [
+    {
+      "role": "user",
+      "content": "First message",
+      "timestamp": 1777220906516
+    },
+    {
+      "role": "assistant",
+      "content": "Response",
+      "timestamp": 1777220906516
+    }
+  ],
+  "status": "created",
+  "isThinking": false,
+  "currentToolCall": null,
+  "pendingPermission": null,
+  "createdAt": 1777220906516,
+  "lastActivity": 1777220906516
+}

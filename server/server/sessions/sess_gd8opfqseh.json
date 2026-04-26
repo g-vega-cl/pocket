@@ -1,0 +1,15 @@
+{
+  "id": "sess_gd8opfqseh",
+  "repoUrl": "https://github.com/test/repo",
+  "task": "Test task",
+  "isLocal": false,
+  "localPath": "/tmp/test",
+  "branchName": "pocket/test-branch",
+  "history": [],
+  "status": "ready",
+  "isThinking": false,
+  "currentToolCall": null,
+  "pendingPermission": null,
+  "createdAt": 1777221177905,
+  "lastActivity": 1777221177905
+}

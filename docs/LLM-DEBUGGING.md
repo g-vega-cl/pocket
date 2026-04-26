@@ -58,6 +58,7 @@ To prevent "thinking undefined" issues and ensure tool calls are executed reliab
 
 ### Server-Side (llm.js)
 - `onReasoning()` is only called with valid string values (not undefined, null, or empty string)
+- **Error Result Synchronization**: When tool execution fails due to malformed JSON, the error result is now added to the message history so the LLM receives it in the next request. Previously, this caused the session to get stuck in a thinking state because the LLM would retry the same tool call indefinitely.
 
 ### Server-Side (index.js)  
 - `fullReasoning` only appends chunks that are valid strings (not undefined, null, or empty string)
@@ -188,6 +189,7 @@ sed -i 's/"reasoning": "undefined"/"reasoning": ""/g' *.json
 - Error: `SyntaxError: Unterminated string in JSON at position 16932`
 - Tool execution fails with `args.path is undefined`
 - Large file writes fail with JSON parsing errors
+- **"Stuck message"**: Chat shows thinking bubbles but no progress
 
 **Root Cause:**
 When the LLM sends tool call arguments in chunks, the JSON structure can become malformed if chunks are split at character boundaries (e.g., mid-escape sequence).
@@ -197,6 +199,7 @@ When the LLM sends tool call arguments in chunks, the JSON structure can become 
 2. Check for `[Tool] Error parsing arguments for write_file`
 3. Look for log files in `server/logs/malformed-json-*.log`
 4. Check the error position in the JSON - it often indicates where the chunk was cut off
+5. For "stuck message" issue: Check if `onToolCall` with `status: 'error'` or `status: 'retry'` is being called
 
 **Solution:**
 The system now includes robust handling:
@@ -204,6 +207,17 @@ The system now includes robust handling:
 - **Fallback Extraction**: Attempts to extract `path` and `content` from malformed JSON
 - **Retry Logic**: Retries tool calls up to 3 times
 - **File Logging**: Logs malformed JSON for debugging
+- **Error Result Synchronization**: When tool execution fails, the error result is added to the message history so the LLM receives it in the next request
+
+**Root Cause of "Stuck Message":**
+Previously, when the LLM sent a tool call with malformed JSON:
+1. The tool execution would fail
+2. The error result was NOT added to the message history
+3. The LLM would receive the same tool call in the next request (because it didn't know it failed)
+4. This created an infinite loop, causing the session to get stuck in a thinking state
+
+**Fix:**
+The error result is now added to `allMessages` so the LLM receives it in the next request and can respond appropriately.
 
 **To view malformed JSON logs:**
 ```bash

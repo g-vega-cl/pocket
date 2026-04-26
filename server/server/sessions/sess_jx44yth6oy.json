@@ -1,0 +1,15 @@
+{
+  "id": "sess_jx44yth6oy",
+  "repoUrl": "https://github.com/a/repo",
+  "task": "t1",
+  "isLocal": false,
+  "localPath": null,
+  "branchName": null,
+  "history": [],
+  "status": "created",
+  "isThinking": false,
+  "currentToolCall": null,
+  "pendingPermission": null,
+  "createdAt": 1777221158633,
+  "lastActivity": 1777221158633
+}

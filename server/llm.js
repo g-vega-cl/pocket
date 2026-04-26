@@ -445,26 +445,68 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
         });
         
         // Return error result instead of executing tool
+        const errorResult = { error: e.message };
         onToolCall({
           id: toolCallId,
           name: toolCall,
           arguments: {},
-          result: { error: e.message },
+          result: errorResult,
           status: 'result',
         });
+        
+        // Add tool call and error result to allMessages so LLM receives it in next request
+        allMessages.push({
+          role: 'assistant',
+          content: assistantMessage,
+          tool_calls: [{
+            id: toolCallId || `call_${Date.now()}`,
+            type: 'function',
+            function: {
+              name: toolCall,
+              arguments: toolArgs,
+            },
+          }],
+        });
+        allMessages.push({
+          role: 'tool',
+          tool_call_id: toolCallId || `call_${Date.now()}`,
+          content: JSON.stringify(errorResult),
+        });
+        
         continue; // Skip to next iteration
       }
       
       // Validate arguments before execution
       if (!parsedArgs || Object.keys(parsedArgs).length === 0) {
         console.error(`[Tool] No valid arguments for ${toolCall}`);
+        const errorResult = { error: 'No valid arguments provided' };
         onToolCall({
           id: toolCallId,
           name: toolCall,
           arguments: {},
-          result: { error: 'No valid arguments provided' },
+          result: errorResult,
           status: 'result',
         });
+        
+        // Add tool call and error result to allMessages so LLM receives it in next request
+        allMessages.push({
+          role: 'assistant',
+          content: assistantMessage,
+          tool_calls: [{
+            id: toolCallId || `call_${Date.now()}`,
+            type: 'function',
+            function: {
+              name: toolCall,
+              arguments: toolArgs,
+            },
+          }],
+        });
+        allMessages.push({
+          role: 'tool',
+          tool_call_id: toolCallId || `call_${Date.now()}`,
+          content: JSON.stringify(errorResult),
+        });
+        
         continue;
       }
       

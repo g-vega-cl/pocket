@@ -195,7 +195,7 @@ async function processChat(sessionId, content, model) {
                type: 'function',
                function: { name: toolCall.name, arguments: JSON.stringify(toolCall.arguments) }
              }
-          ]);
+           ]);
         } else if (toolCall.status === 'result') {
           updateSession(sessionId, { currentToolCall: { name: toolCall.name, args: toolCall.arguments, result: toolCall.result }, isThinking: true });
 
@@ -206,6 +206,28 @@ async function processChat(sessionId, content, model) {
             tool_args: toolCall.arguments,
             tool_result: toolCall.result,
             tool_call_id: toolCall.id || `call_${Date.now()}`
+          });
+        } else if (toolCall.status === 'error') {
+          console.error(`[Tool] Error executing tool ${toolCall.name}: ${toolCall.error}`);
+          updateSession(sessionId, { 
+            currentToolCall: null, 
+            isThinking: false,
+            status: 'error'
+          });
+          addToHistory(sessionId, {
+            role: 'tool',
+            content: JSON.stringify({ error: toolCall.error }),
+            tool_call: toolCall.name,
+            tool_args: toolCall.arguments || {},
+            tool_result: { error: toolCall.error },
+            tool_call_id: toolCall.id || `call_${Date.now()}`
+          });
+        } else if (toolCall.status === 'retry') {
+          console.warn(`[Tool] Retry requested for tool ${toolCall.name}: ${toolCall.error}`);
+          // Keep isThinking true to allow retry
+          updateSession(sessionId, { 
+            currentToolCall: { name: toolCall.name, args: toolCall.arguments },
+            isThinking: true
           });
         }
       },

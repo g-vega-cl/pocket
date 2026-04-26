@@ -1,0 +1,15 @@
+{
+  "id": "sess_96xi2yqwzw",
+  "repoUrl": "https://github.com/test/repo",
+  "task": "Test task",
+  "isLocal": false,
+  "localPath": null,
+  "branchName": null,
+  "history": [],
+  "status": "cloning",
+  "isThinking": false,
+  "currentToolCall": null,
+  "pendingPermission": null,
+  "createdAt": 1777221158635,
+  "lastActivity": 1777221158635
+}

@@ -1,0 +1,15 @@
+{
+  "id": "sess_dlzz39el5dw",
+  "repoUrl": "repo2",
+  "task": "task2",
+  "isLocal": false,
+  "localPath": null,
+  "branchName": null,
+  "history": [],
+  "status": "created",
+  "isThinking": false,
+  "currentToolCall": null,
+  "pendingPermission": null,
+  "createdAt": 1777221198767,
+  "lastActivity": 1777221198767
+}
