@@ -1,0 +1,15 @@
+{
+  "id": "sess_5atz3tif9ik",
+  "repoUrl": "repo1",
+  "task": "task1",
+  "isLocal": false,
+  "localPath": null,
+  "branchName": null,
+  "history": [],
+  "status": "created",
+  "isThinking": false,
+  "currentToolCall": null,
+  "pendingPermission": null,
+  "createdAt": 1777217581396,
+  "lastActivity": 1777217581396
+}

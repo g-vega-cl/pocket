@@ -1,0 +1,15 @@
+{
+  "id": "sess_90t0r12thhd",
+  "repoUrl": "repo2",
+  "task": "task2",
+  "isLocal": false,
+  "localPath": null,
+  "branchName": null,
+  "history": [],
+  "status": "created",
+  "isThinking": false,
+  "currentToolCall": null,
+  "pendingPermission": null,
+  "createdAt": 1777217581397,
+  "lastActivity": 1777217581397
+}

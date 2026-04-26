@@ -245,6 +245,62 @@ describe('LLM Client', () => {
       expect(fetchCallCount).toBe(2);
     });
 
+    it('should execute tool even if finish_reason is not tool_calls', async () => {
+      const { streamChat } = await import('../llm.js');
+
+      const toolCalls = [];
+      let fetchCallCount = 0;
+
+      global.fetch = vi.fn().mockImplementation(() => {
+        const currentFetch = fetchCallCount++;
+        const mockGetReader = () => {
+          let readCount = 0;
+          return {
+            read: async () => {
+              readCount++;
+              if (currentFetch === 0) {
+                if (readCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"tool_calls":[{"function":{"name":"read_file","arguments":"{\\"path\\":\\"test.js\\"}"},"id":"call_123"}]}}]}\n'),
+                  };
+                }
+                if (readCount === 2) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"finish_reason":"stop"}]}\n'),
+                  };
+                }
+              } else {
+                if (readCount === 1) {
+                  return {
+                    done: false,
+                    value: new TextEncoder().encode('data: {"choices":[{"delta":{"content":"Done"}}]}\n'),
+                  };
+                }
+              }
+              return { done: true, value: new Uint8Array() };
+            },
+          };
+        };
+        return Promise.resolve({
+          ok: true,
+          body: { getReader: mockGetReader },
+        });
+      });
+
+      await streamChat(
+        [{ role: 'user', content: 'Read the file' }],
+        () => {},
+        (toolCall) => toolCalls.push(toolCall),
+        async () => ({ success: true })
+      );
+
+      // Should have executed the tool because tool call was present, despite finish_reason: stop
+      expect(toolCalls.some(t => t.name === 'read_file' && t.status === 'result')).toBe(true);
+      expect(fetchCallCount).toBe(2);
+    });
+
     it('should call onStartTurn before each API request', async () => {
       const { streamChat } = await import('../llm.js');
 

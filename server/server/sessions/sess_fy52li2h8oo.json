@@ -1,0 +1,15 @@
+{
+  "id": "sess_fy52li2h8oo",
+  "repoUrl": "https://github.com/test/repo",
+  "task": "Fix a bug",
+  "isLocal": false,
+  "localPath": null,
+  "branchName": null,
+  "history": [],
+  "status": "created",
+  "isThinking": false,
+  "currentToolCall": null,
+  "pendingPermission": null,
+  "createdAt": 1777217580570,
+  "lastActivity": 1777217580570
+}
