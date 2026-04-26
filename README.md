@@ -53,8 +53,12 @@ Enable debug logging to see LLM interactions:
 - Server logs show `[LLM] Delta:` and `[LLM] Complete:` messages
 - These appear in the server console and are sent to the client as `type: 'debug'` messages
 - Use debug logs to diagnose issues with LLM responses or tool calls
+- Malformed JSON in tool arguments is automatically logged to `server/logs/` for debugging
 
-See [LLM Debugging Guide](docs/LLM-DEBUGGING.md) for detailed troubleshooting.
+See [LLM Debugging Guide](docs/LLM-DEBUGGING.md) for detailed troubleshooting, including:
+- Handling malformed JSON in tool arguments
+- Retry logic for failed tool calls
+- Viewing and analyzing error logs
 
 ## Test
 

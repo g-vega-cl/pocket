@@ -52,6 +52,8 @@ To prevent "thinking undefined" issues and ensure tool calls are executed reliab
 ### Tool Call Robustness (llm.js)
 - **Finish Reason Independence**: The agent now processes tool calls based on their presence in the stream rather than strictly relying on `finish_reason: 'tool_calls'`. This ensures compatibility with models that end the stream with `finish_reason: 'stop'` even when a tool call was provided.
 - **Robust Argument Parsing**: Tool argument JSON parsing is now wrapped in try-catch blocks to prevent the entire session from crashing on malformed LLM output.
+- **JSON Validation and Fallback**: Before parsing tool arguments, the system validates the JSON structure. If parsing fails, it attempts to extract `path` and `content` using a safe regex pattern.
+- **Retry Logic**: Tool calls with malformed JSON are retried up to 3 times before giving up, with each retry logging the attempt.
 - **Finalization**: Tool calls are explicitly finalized after the stream ends to ensure no tool calls are missed.
 
 ### Server-Side (llm.js)
@@ -59,12 +61,48 @@ To prevent "thinking undefined" issues and ensure tool calls are executed reliab
 
 ### Server-Side (index.js)  
 - `fullReasoning` only appends chunks that are valid strings (not undefined, null, or empty string)
+- **Argument Validation**: The `write_file` tool now validates that `path` and `content` arguments are present before execution
 
 ### Server-Side (sessions.js)
 - `reasoning` field is only updated with valid string values (not undefined, null, or empty string)
 
 ### Client-Side (PocketApp.tsx)
 - "Thinking" section only renders if `msg.reasoning` is truthy AND not the string "undefined"
+
+## Malformed JSON Handling
+
+### Overview
+When the LLM sends tool call arguments in chunks, the JSON structure can become malformed if chunks are split at character boundaries. The system now includes robust handling for this scenario.
+
+### How It Works
+1. **Validation**: Before parsing, the system checks if the accumulated JSON string is valid using `isValidJSON()`
+2. **Fallback Extraction**: If JSON is malformed, the system attempts to extract `path` and `content` using a regex pattern: `/"([^"\\]*(?:\\.[^"\\]*)*)"/g`
+3. **Retry Logic**: Failed tool calls are retried up to 3 times (per tool call)
+4. **File Logging**: Malformed JSON is logged to `server/logs/malformed-json-{timestamp}.log` for debugging
+5. **Auto-cleanup**: Log files older than 7 days are automatically deleted
+
+### Log Format
+Each malformed JSON log contains:
+```json
+{
+  "timestamp": "2026-04-26T12:15:42.123Z",
+  "toolCall": "write_file",
+  "rawArguments": "{\"path\": \"test.txt\", \"content\": \"...",
+  "error": "Unterminated string in JSON at position 16932"
+}
+```
+
+### Viewing Malformed JSON Logs
+```bash
+# View all logs
+ls -la server/logs/
+
+# View latest log
+tail -n 50 server/logs/malformed-json-*.log | head -100
+
+# Search for specific tool call
+grep -l "write_file" server/logs/malformed-json-*.log
+```
 
 ## Common Scenarios
 
@@ -144,6 +182,46 @@ cd server/sessions
 sed -i 's/"reasoning": "undefined"/"reasoning": ""/g' *.json
 ```
 
+### 5. Malformed JSON in Tool Arguments
+
+**Symptoms:**
+- Error: `SyntaxError: Unterminated string in JSON at position 16932`
+- Tool execution fails with `args.path is undefined`
+- Large file writes fail with JSON parsing errors
+
+**Root Cause:**
+When the LLM sends tool call arguments in chunks, the JSON structure can become malformed if chunks are split at character boundaries (e.g., mid-escape sequence).
+
+**Debug Check:**
+1. Check server logs for `[LLM] Malformed JSON, attempting fallback extraction`
+2. Check for `[Tool] Error parsing arguments for write_file`
+3. Look for log files in `server/logs/malformed-json-*.log`
+4. Check the error position in the JSON - it often indicates where the chunk was cut off
+
+**Solution:**
+The system now includes robust handling:
+- **JSON Validation**: Validates JSON before parsing
+- **Fallback Extraction**: Attempts to extract `path` and `content` from malformed JSON
+- **Retry Logic**: Retries tool calls up to 3 times
+- **File Logging**: Logs malformed JSON for debugging
+
+**To view malformed JSON logs:**
+```bash
+# List all logs
+ls -la server/logs/
+
+# View latest log
+tail -n 100 server/logs/malformed-json-*.log | head -200
+
+# Search for specific tool call
+grep -l "write_file" server/logs/malformed-json-*.log | xargs cat
+```
+
+**Prevention:**
+- Ensure LLM is sending complete JSON chunks
+- Check system prompt for clarity on tool argument format
+- Monitor for patterns in malformed JSON (e.g., specific content lengths)
+
 ## System Prompt Changes
 
 The system prompt in `server/llm.js` now includes explicit rules to prevent infinite tool-call loops:
@@ -167,3 +245,17 @@ The system prompt in `server/llm.js` now includes explicit rules to prevent infi
 
 - [Architecture.md](Architecture.md) - Overall system architecture
 - [POLLING-MIGRATION.md](POLLING-MIGRATION.md) - Polling-based architecture details
+
+## Quick Reference: JSON Error Handling
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| `Unterminated string in JSON` | LLM sent incomplete JSON | System retries automatically (up to 3 times) |
+| `args.path is undefined` | Tool arguments failed to parse | Check `server/logs/malformed-json-*.log` |
+| `Fallback extraction failed` | Could not extract path/content | Review LLM output for malformed structure |
+
+**View logs:**
+```bash
+ls -la server/logs/malformed-json-*.log
+cat server/logs/malformed-json-*.log | jq .
+```

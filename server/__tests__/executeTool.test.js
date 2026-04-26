@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const mockExecSync = vi.fn();
 const mockReadFileSync = vi.fn();
@@ -22,6 +22,10 @@ vi.mock('fs', () => ({
 describe('executeTool', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.resetModules();
   });
 
   it('should pass branchName to gitPush for git_push tool', async () => {
@@ -57,4 +61,5 @@ describe('executeTool', () => {
       { stdio: 'inherit' }
     );
   });
+
 });

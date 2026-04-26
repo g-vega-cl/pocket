@@ -360,6 +360,14 @@ async function executeTool(localPath, toolName, args, requestPermission, githubT
       return readFile(localPath, args.path);
 
     case 'write_file': {
+      // Validate required arguments
+      if (!args.path) {
+        return { error: 'Missing required argument: path' };
+      }
+      if (args.content === undefined || args.content === null) {
+        return { error: 'Missing required argument: content' };
+      }
+      
       if (isPathOutside(args.path)) {
         return { error: `Permission denied: Writing file outside of sandbox is not allowed: ${args.path}` };
       }
@@ -430,3 +438,6 @@ loadSessionsFromDisk();
 server.listen(PORT, () => {
   console.log(`Pocket server running on port ${PORT}`);
 });
+
+// Export for testing
+export { executeTool };

@@ -1,6 +1,90 @@
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1';
 const DEFAULT_MODEL = 'xiaomi/mimo-v2-flash';
+
+// Helper: Validate JSON string
+function isValidJSON(str) {
+  try {
+    JSON.parse(str);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Helper: Fallback extraction using safe regex
+function extractArgumentsFallback(str) {
+  const keyRegex = /"([^"\\]*(?:\\.[^"\\]*)*)"/g;
+  const matches = [...str.matchAll(keyRegex)];
+  
+  if (matches.length >= 4) {
+    let pathIdx = -1;
+    let contentIdx = -1;
+    
+    for (let i = 0; i < matches.length; i++) {
+      if (matches[i][1] === 'path') pathIdx = i + 1;
+      if (matches[i][1] === 'content') contentIdx = i + 1;
+    }
+    
+    if (pathIdx > 0 && pathIdx < matches.length && 
+        contentIdx > 0 && contentIdx < matches.length) {
+      return {
+        path: matches[pathIdx][1],
+        content: matches[contentIdx][1]
+      };
+    }
+  }
+  return null;
+}
+
+// Helper: Log malformed JSON to file with auto-cleanup
+function logMalformedJSON(data) {
+  const logDir = path.join(__dirname, 'logs');
+  try {
+    if (!fs.existsSync(logDir)) {
+      fs.mkdirSync(logDir, { recursive: true });
+    }
+    
+    // Auto-cleanup: Delete logs older than 7 days
+    const now = Date.now();
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    
+    fs.readdirSync(logDir).forEach(file => {
+      const filePath = path.join(logDir, file);
+      try {
+        const stats = fs.statSync(filePath);
+        if (now - stats.mtimeMs > sevenDaysMs) {
+          fs.unlinkSync(filePath);
+        }
+      } catch (e) {
+        // Ignore errors when reading file stats
+      }
+    });
+    
+    // Create new log file
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const logFile = path.join(logDir, `malformed-json-${timestamp}.log`);
+    
+    const logData = {
+      timestamp: new Date().toISOString(),
+      toolCall: data.toolCall,
+      rawArguments: data.arguments,
+      error: data.error,
+    };
+    
+    fs.writeFileSync(logFile, JSON.stringify(logData, null, 2));
+    console.log(`[LLM] Malformed JSON logged to ${logFile}`);
+  } catch (e) {
+    console.error('[LLM] Failed to log malformed JSON:', e);
+  }
+}
 
 const SYSTEM_PROMPT = `You are Pocket, an autonomous coding agent.
 
@@ -251,16 +335,63 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
     }
 
     // Finalize any pending tool call after stream ends
+    const MAX_RETRIES = 3;
+    let retryCount = 0;
+    
     if (currentToolCall) {
       try {
+        let parsedArgs;
+        
+        if (isValidJSON(currentToolArgs)) {
+          parsedArgs = JSON.parse(currentToolArgs);
+        } else {
+          // Attempt fallback extraction
+          console.warn('[LLM] Malformed JSON, attempting fallback extraction');
+          parsedArgs = extractArgumentsFallback(currentToolArgs);
+          
+          if (!parsedArgs) {
+            throw new Error('Fallback extraction failed');
+          }
+        }
+        
         onToolCall({
           id: currentToolCallId,
           name: currentToolCall,
-          arguments: JSON.parse(currentToolArgs || '{}'),
+          arguments: parsedArgs,
           status: 'complete',
         });
       } catch (e) {
         console.error('[LLM] Error finalizing tool call:', e);
+        
+        // Log malformed JSON for debugging
+        logMalformedJSON({
+          toolCall: currentToolCall,
+          arguments: currentToolArgs,
+          error: e.message,
+        });
+        
+        // Handle retry logic
+        if (retryCount < MAX_RETRIES) {
+          retryCount++;
+          console.warn(`[LLM] Retry ${retryCount}/${MAX_RETRIES} for tool call`);
+          // Return status to trigger retry
+          onToolCall({
+            id: currentToolCallId,
+            name: currentToolCall,
+            arguments: {},
+            status: 'retry',
+            error: e.message,
+          });
+        } else {
+          // Max retries reached, return error
+          onToolCall({
+            id: currentToolCallId,
+            name: currentToolCall,
+            arguments: {},
+            status: 'error',
+            error: `Max retries (${MAX_RETRIES}) exceeded: ${e.message}`,
+          });
+        }
       }
     }
 
@@ -292,17 +423,57 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
     if (toolCall) {
       console.log(`[Tool] Executing ${toolCall}...`);
       let parsedArgs = {};
+      
       try {
-        parsedArgs = JSON.parse(toolArgs || '{}');
+        if (isValidJSON(toolArgs)) {
+          parsedArgs = JSON.parse(toolArgs);
+        } else {
+          console.warn('[LLM] Malformed JSON in tool execution, attempting fallback');
+          parsedArgs = extractArgumentsFallback(toolArgs);
+          if (!parsedArgs) {
+            throw new Error('Could not extract arguments from malformed JSON');
+          }
+        }
       } catch (e) {
         console.error(`[Tool] Error parsing arguments for ${toolCall}:`, e);
+        
+        // Log malformed JSON
+        logMalformedJSON({
+          toolCall: toolCall,
+          arguments: toolArgs,
+          error: e.message,
+        });
+        
+        // Return error result instead of executing tool
+        onToolCall({
+          id: toolCallId,
+          name: toolCall,
+          arguments: {},
+          result: { error: e.message },
+          status: 'result',
+        });
+        continue; // Skip to next iteration
       }
+      
+      // Validate arguments before execution
+      if (!parsedArgs || Object.keys(parsedArgs).length === 0) {
+        console.error(`[Tool] No valid arguments for ${toolCall}`);
+        onToolCall({
+          id: toolCallId,
+          name: toolCall,
+          arguments: {},
+          result: { error: 'No valid arguments provided' },
+          status: 'result',
+        });
+        continue;
+      }
+      
       const toolResult = await executeTool(toolCall, parsedArgs);
       console.log(`[Tool] ${toolCall} completed.`);
       onToolCall({
         id: toolCallId,
         name: toolCall,
-        arguments: JSON.parse(toolArgs || '{}'),
+        arguments: parsedArgs,
         result: toolResult,
         status: 'result',
       });
