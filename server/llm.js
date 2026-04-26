@@ -244,18 +244,23 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
             }
           }
 
-          if (finishReason === 'tool_calls') {
-            if (currentToolCall) {
-              onToolCall({
-                id: currentToolCallId,
-                name: currentToolCall,
-                arguments: JSON.parse(currentToolArgs || '{}'),
-                status: 'complete',
-              });
-            }
-          }
         } catch (e) {
+          console.error('[LLM] Error parsing delta:', e);
         }
+      }
+    }
+
+    // Finalize any pending tool call after stream ends
+    if (currentToolCall) {
+      try {
+        onToolCall({
+          id: currentToolCallId,
+          name: currentToolCall,
+          arguments: JSON.parse(currentToolArgs || '{}'),
+          status: 'complete',
+        });
+      } catch (e) {
+        console.error('[LLM] Error finalizing tool call:', e);
       }
     }
 
@@ -279,13 +284,20 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
     console.log('[LLM] Complete:', debugMsg.data);
     if (onRaw) onRaw(debugMsg);
 
-    if (finishReason !== 'tool_calls') {
+    // Some models might not use 'tool_calls' as finishReason but still provide tool calls
+    if (!toolCall && finishReason !== 'tool_calls') {
       break;
     }
 
     if (toolCall) {
       console.log(`[Tool] Executing ${toolCall}...`);
-      const toolResult = await executeTool(toolCall, JSON.parse(toolArgs || '{}'));
+      let parsedArgs = {};
+      try {
+        parsedArgs = JSON.parse(toolArgs || '{}');
+      } catch (e) {
+        console.error(`[Tool] Error parsing arguments for ${toolCall}:`, e);
+      }
+      const toolResult = await executeTool(toolCall, parsedArgs);
       console.log(`[Tool] ${toolCall} completed.`);
       onToolCall({
         id: toolCallId,

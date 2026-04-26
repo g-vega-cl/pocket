@@ -212,25 +212,19 @@ async function processChat(sessionId, content, model) {
       async (toolName, args) => {
         const requestPermission = async (reason) => {
           const requestId = Math.random().toString(36).substring(7);
-
-          // Save pending permission to session state so it's persistent
           const pendingPermission = { requestId, tool: toolName, args, reason };
           updateSession(sessionId, { pendingPermission });
-
-
-
           return new Promise((resolve) => {
             pendingPermissions.set(requestId, resolve);
           });
         };
         return await executeTool(session.localPath, toolName, args, requestPermission, session.githubToken, session.branchName);
       },
-
-      () => {
+      null, // onRaw
+      () => { // onStartTurn
          updateSession(sessionId, { isThinking: true });
-
       },
-      (chunk) => {
+      (chunk) => { // onReasoning
         // Defensive coding: only append valid string values
         if (chunk !== undefined && chunk !== null && chunk !== '') {
           fullReasoning += chunk;
