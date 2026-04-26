@@ -42,9 +42,17 @@ Debug logs are also sent to the client via the polling mechanism as `type: 'debu
 2. Go to Console tab
 3. Look for messages starting with `[SSE]` or check the network tab for polling responses
 
-## Defensive Coding Implemented
+## Defensive Coding and Robustness Improvements
 
-To prevent "thinking undefined" issues, the following defensive checks have been added:
+To prevent "thinking undefined" issues and ensure tool calls are executed reliably, the following improvements have been added:
+
+### Callback Alignment (index.js)
+- Corrected the alignment of arguments passed to `streamChat`. Previously, the reasoning and start-turn callbacks were swapped, which caused the backend to incorrectly handle reasoning tokens and possibly fail when using models that provide them.
+
+### Tool Call Robustness (llm.js)
+- **Finish Reason Independence**: The agent now processes tool calls based on their presence in the stream rather than strictly relying on `finish_reason: 'tool_calls'`. This ensures compatibility with models that end the stream with `finish_reason: 'stop'` even when a tool call was provided.
+- **Robust Argument Parsing**: Tool argument JSON parsing is now wrapped in try-catch blocks to prevent the entire session from crashing on malformed LLM output.
+- **Finalization**: Tool calls are explicitly finalized after the stream ends to ensure no tool calls are missed.
 
 ### Server-Side (llm.js)
 - `onReasoning()` is only called with valid string values (not undefined, null, or empty string)
