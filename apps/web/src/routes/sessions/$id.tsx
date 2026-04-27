@@ -119,7 +119,7 @@ function PermissionPrompt({
 function SessionChatView() {
   const { id } = Route.useParams()
   const {
-    messages, toolCalls, pendingPermissions, status, isThinking, error,
+    messages, pendingPermissions, status, isThinking, error,
     connected, session, sendMessage, abort, resolvePermission, loadSession,
   } = usePocketSession(id)
 
@@ -132,7 +132,7 @@ function SessionChatView() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, toolCalls])
+  }, [messages])
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault()
@@ -169,13 +169,11 @@ function SessionChatView() {
                 </div>
               )}
               <div className="whitespace-pre-wrap break-words">{msg.content || (isThinking && i === messages.length - 1 ? 'Thinking...' : '')}</div>
+              {msg.toolCalls?.map(tc => (
+                <ToolCallCard key={tc.toolCallId} toolCall={tc} />
+              ))}
             </div>
           </div>
-        ))}
-
-        {/* Tool calls */}
-        {toolCalls.map(tc => (
-          <ToolCallCard key={tc.toolCallId} toolCall={tc} />
         ))}
 
         {/* Pending permissions */}

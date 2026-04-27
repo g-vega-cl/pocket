@@ -18,7 +18,6 @@ describe('reduceEvents', () => {
     expect(state.messages).toEqual([])
     expect(state.status).toBe('creating')
     expect(state.isThinking).toBe(false)
-    expect(state.toolCalls).toEqual([])
     expect(state.pendingPermissions).toEqual([])
   })
 
@@ -60,16 +59,20 @@ describe('reduceEvents', () => {
     expect(state.status).toBe('idle')
   })
 
-  it('should process tool call events', () => {
+  it('should attach tool call events to the last assistant message', () => {
     const state = reduceEvents([
       ev({ type: 'user_message', seq: 1, payload: { content: 'Read file' } }),
-      ev({ type: 'tool_call_start', seq: 2, payload: { toolCallId: 't1', toolName: 'read_file', args: { path: 'foo.txt' } } }),
-      ev({ type: 'tool_call_result', seq: 3, payload: { toolCallId: 't1', toolName: 'read_file', result: 'file content' } }),
+      ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'Sure' } }),
+      ev({ type: 'assistant_text_done', seq: 3, payload: { text: 'Sure' } }),
+      ev({ type: 'tool_call_start', seq: 4, payload: { toolCallId: 't1', toolName: 'read_file', args: { path: 'foo.txt' } } }),
+      ev({ type: 'tool_call_result', seq: 5, payload: { toolCallId: 't1', toolName: 'read_file', result: 'file content' } }),
     ])
-    expect(state.toolCalls).toHaveLength(1)
-    expect(state.toolCalls[0].toolName).toBe('read_file')
-    expect(state.toolCalls[0].status).toBe('done')
-    expect(state.toolCalls[0].result).toBe('file content')
+    expect(state.messages).toHaveLength(2)
+    expect(state.messages[1].role).toBe('assistant')
+    expect(state.messages[1].toolCalls).toHaveLength(1)
+    expect(state.messages[1].toolCalls![0].toolName).toBe('read_file')
+    expect(state.messages[1].toolCalls![0].status).toBe('done')
+    expect(state.messages[1].toolCalls![0].result).toBe('file content')
   })
 
   it('should collect pending permissions', () => {
@@ -89,7 +92,7 @@ describe('reduceEvents', () => {
     expect(state.pendingPermissions).toHaveLength(0)
   })
 
-  it('should interleave tool calls and messages in order', () => {
+  it('should interleave tool calls inside assistant messages in order', () => {
     const state = reduceEvents([
       ev({ type: 'user_message', seq: 1, payload: { content: 'Fix bug' } }),
       ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'Let me read the file' } }),
@@ -99,9 +102,40 @@ describe('reduceEvents', () => {
       ev({ type: 'assistant_text_delta', seq: 6, payload: { text: 'Fixed!' } }),
       ev({ type: 'assistant_text_done', seq: 7, payload: { text: 'Fixed!' } }),
     ])
-    // Should have: user message, assistant message, tool call, assistant message
-    expect(state.messages).toHaveLength(3) // 2 user/assistant messages
-    expect(state.toolCalls).toHaveLength(1)
+    // Should have: user message, assistant message (with tool call), assistant message
+    expect(state.messages).toHaveLength(3)
+    expect(state.messages[1].role).toBe('assistant')
+    expect(state.messages[1].content).toBe('Let me read the file')
+    expect(state.messages[1].toolCalls).toHaveLength(1)
+    expect(state.messages[1].toolCalls![0].toolName).toBe('read_file')
+    expect(state.messages[2].role).toBe('assistant')
+    expect(state.messages[2].content).toBe('Fixed!')
+    expect(state.messages[2].toolCalls).toBeUndefined()
+  })
+
+  it('should attach tool calls to a synthetic assistant message if no done event exists', () => {
+    const state = reduceEvents([
+      ev({ type: 'user_message', seq: 1, payload: { content: 'Go' } }),
+      ev({ type: 'tool_call_start', seq: 2, payload: { toolCallId: 't1', toolName: 'read_file', args: {} } }),
+      ev({ type: 'tool_call_result', seq: 3, payload: { toolCallId: 't1', toolName: 'read_file', result: 'ok' } }),
+    ])
+    expect(state.messages).toHaveLength(2)
+    expect(state.messages[1].role).toBe('assistant')
+    expect(state.messages[1].content).toBe('')
+    expect(state.messages[1].toolCalls).toHaveLength(1)
+    expect(state.messages[1].toolCalls![0].status).toBe('done')
+  })
+
+  it('should update tool call progress inside assistant message', () => {
+    const state = reduceEvents([
+      ev({ type: 'user_message', seq: 1, payload: { content: 'Go' } }),
+      ev({ type: 'assistant_text_done', seq: 2, payload: { text: 'Running' } }),
+      ev({ type: 'tool_call_start', seq: 3, payload: { toolCallId: 't1', toolName: 'bash', args: { command: 'npm test' } } }),
+      ev({ type: 'tool_call_progress', seq: 4, payload: { toolCallId: 't1', toolName: 'bash', message: 'Compiling...' } }),
+      ev({ type: 'tool_call_progress', seq: 5, payload: { toolCallId: 't1', toolName: 'bash', message: 'Running tests...' } }),
+      ev({ type: 'tool_call_result', seq: 6, payload: { toolCallId: 't1', toolName: 'bash', result: 'pass' } }),
+    ])
+    expect(state.messages[1].toolCalls![0].progress).toBe('Running tests...')
   })
 
   it('should handle reasoning in assistant_text_delta', () => {

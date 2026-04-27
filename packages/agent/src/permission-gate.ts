@@ -34,6 +34,12 @@ export class PermissionGate {
     this.sessionRules.delete(sessionId)
   }
 
+  getSessionRules(sessionId: string): Record<string, PermissionLevel> {
+    const rules = this.sessionRules.get(sessionId)
+    if (!rules) return {}
+    return Object.fromEntries(rules)
+  }
+
   checkPermission(input: PermissionCheckInput): PermissionResult {
     const { tool, toolName, args, sessionId, workspaceRoot } = input
 

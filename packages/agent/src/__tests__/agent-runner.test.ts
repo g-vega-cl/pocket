@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { EventLog } from '../event-log.js'
 import { AgentRunner } from '../agent-runner.js'
 import { ToolRegistry } from '../tool-registry.js'
+import { PermissionGate } from '../permission-gate.js'
 import type { Event, LLMChunk, ChatUsage, ChatRequest, ToolContext, Progress, Tool, ToolDefinition } from '@pocket/core'
 
 function makeMockProvider() {
@@ -333,5 +334,209 @@ describe('AgentRunner', () => {
     expect(callArgs.tools).toBeDefined()
     expect(callArgs.tools!.length).toBe(1)
     expect(callArgs.tools![0].function.name).toBe('tool_x')
+  })
+
+  describe('permission system', () => {
+    function makeAskTool(name: string): Tool {
+      return {
+        name,
+        description: `Tool ${name}`,
+        inputSchema: z.object({ input: z.string().optional() }),
+        isReadOnly: false,
+        defaultPermission: 'ask' as const,
+        async *call(input: { input?: string }, _ctx: ToolContext): AsyncGenerator<Progress, string> {
+          return `result of ${name}`
+        },
+      }
+    }
+
+    it('should emit permission_requested and pause when tool needs ask', async () => {
+      registry.register(makeAskTool('ask_tool'))
+
+      const provider = makeMockProvider()
+      let firstCall = true
+      provider.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        if (firstCall) {
+          firstCall = false
+          yield { type: 'tool_call', toolCall: { id: 'call_1', name: 'ask_tool', arguments: '{}' } }
+          return { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+        }
+        yield { type: 'text', text: 'Done' }
+        return { promptTokens: 20, completionTokens: 2, totalTokens: 22 }
+      })
+
+      const gate = new PermissionGate({ bashAllow: [], bashDeny: [], protectedBranches: [] })
+      const runner = new AgentRunner({
+        sessionId: 'sess_test',
+        provider: provider as any,
+        eventLog,
+        tools: registry,
+        model: 'openai/gpt-4o',
+        onEvent: (event) => capturedEvents.push(event),
+        systemPrompt: 'Helper',
+        permissionGate: gate,
+      })
+
+      const turnPromise = runner.runTurn({ role: 'user', content: 'Run ask tool' })
+
+      // Wait a bit for permission_requested to be emitted
+      await new Promise(r => setTimeout(r, 50))
+
+      const permReqEvents = capturedEvents.filter(e => e.type === 'permission_requested')
+      expect(permReqEvents.length).toBe(1)
+      expect(permReqEvents[0].payload.toolName).toBe('ask_tool')
+
+      const statusEvents = capturedEvents.filter(e => e.type === 'status')
+      expect(statusEvents.some(e => e.payload.status === 'awaiting_permission')).toBe(true)
+
+      // Resolve permission
+      await runner.resolvePermission(permReqEvents[0].payload.permissionId as string, 'allow')
+
+      await turnPromise
+
+      const permResEvents = capturedEvents.filter(e => e.type === 'permission_resolved')
+      expect(permResEvents.length).toBe(1)
+      expect(permResEvents[0].payload.resolution).toBe('allow')
+
+      const toolResultEvents = capturedEvents.filter(e => e.type === 'tool_call_result')
+      expect(toolResultEvents.length).toBe(1)
+      expect(toolResultEvents[0].payload.result).toBe('result of ask_tool')
+    })
+
+    it('should return error when permission is denied', async () => {
+      registry.register(makeAskTool('deny_tool'))
+
+      const provider = makeMockProvider()
+      let firstCall = true
+      provider.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        if (firstCall) {
+          firstCall = false
+          yield { type: 'tool_call', toolCall: { id: 'call_1', name: 'deny_tool', arguments: '{}' } }
+          return { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+        }
+        yield { type: 'text', text: 'Done' }
+        return { promptTokens: 20, completionTokens: 2, totalTokens: 22 }
+      })
+
+      const gate = new PermissionGate({ bashAllow: [], bashDeny: [], protectedBranches: [] })
+      const runner = new AgentRunner({
+        sessionId: 'sess_test',
+        provider: provider as any,
+        eventLog,
+        tools: registry,
+        model: 'openai/gpt-4o',
+        onEvent: (event) => capturedEvents.push(event),
+        systemPrompt: 'Helper',
+        permissionGate: gate,
+      })
+
+      const turnPromise = runner.runTurn({ role: 'user', content: 'Run deny tool' })
+
+      await new Promise(r => setTimeout(r, 50))
+
+      const permReqEvents = capturedEvents.filter(e => e.type === 'permission_requested')
+      expect(permReqEvents.length).toBe(1)
+
+      await runner.resolvePermission(permReqEvents[0].payload.permissionId as string, 'deny')
+
+      await turnPromise
+
+      const toolResultEvents = capturedEvents.filter(e => e.type === 'tool_call_result')
+      expect(toolResultEvents.length).toBe(1)
+      expect(toolResultEvents[0].payload.error).toBe('Permission denied by user')
+    })
+
+    it('should bypass ask when alwaysAllow is set', async () => {
+      registry.register(makeAskTool('always_tool'))
+
+      const provider1 = makeMockProvider()
+      provider1.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        yield { type: 'tool_call', toolCall: { id: 'call_1', name: 'always_tool', arguments: '{}' } }
+        return { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+      })
+
+      const gate = new PermissionGate({ bashAllow: [], bashDeny: [], protectedBranches: [] })
+      let alwaysAllowToolName: string | null = null
+      const runner = new AgentRunner({
+        sessionId: 'sess_test',
+        provider: provider1 as any,
+        eventLog,
+        tools: registry,
+        model: 'openai/gpt-4o',
+        onEvent: (event) => capturedEvents.push(event),
+        systemPrompt: 'Helper',
+        permissionGate: gate,
+        onPermissionAlwaysAllow: (toolName) => {
+          alwaysAllowToolName = toolName
+        },
+      })
+
+      // First call: should ask
+      const turnPromise1 = runner.runTurn({ role: 'user', content: 'Run always tool' })
+      await new Promise(r => setTimeout(r, 50))
+      const permReq1 = capturedEvents.filter(e => e.type === 'permission_requested')
+      expect(permReq1.length).toBe(1)
+      await runner.resolvePermission(permReq1[0].payload.permissionId as string, 'allow', true)
+      await turnPromise1
+
+      expect(alwaysAllowToolName).toBe('always_tool')
+
+      // Second call: should NOT ask
+      // Update the same provider mock to return text on subsequent calls
+      let secondCallCount = 0
+      provider1.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        secondCallCount++
+        if (secondCallCount === 1) {
+          yield { type: 'tool_call', toolCall: { id: 'call_2', name: 'always_tool', arguments: '{}' } }
+          return { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+        }
+        yield { type: 'text', text: 'Done' }
+        return { promptTokens: 20, completionTokens: 2, totalTokens: 22 }
+      })
+      capturedEvents.length = 0
+
+      const turnPromise2 = runner.runTurn({ role: 'user', content: 'Run always tool again' })
+      await new Promise(r => setTimeout(r, 50))
+      await turnPromise2
+
+      const permReq2 = capturedEvents.filter(e => e.type === 'permission_requested')
+      expect(permReq2.length).toBe(0)
+
+      const toolResultEvents = capturedEvents.filter(e => e.type === 'tool_call_result')
+      expect(toolResultEvents.length).toBe(1)
+      expect(toolResultEvents[0].payload.result).toBe('result of always_tool')
+    })
+
+    it('should clean up pending permissions on abort', async () => {
+      registry.register(makeAskTool('abort_tool'))
+
+      const provider = makeMockProvider()
+      provider.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        yield { type: 'tool_call', toolCall: { id: 'call_1', name: 'abort_tool', arguments: '{}' } }
+        return { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+      })
+
+      const gate = new PermissionGate({ bashAllow: [], bashDeny: [], protectedBranches: [] })
+      const runner = new AgentRunner({
+        sessionId: 'sess_test',
+        provider: provider as any,
+        eventLog,
+        tools: registry,
+        model: 'openai/gpt-4o',
+        onEvent: (event) => capturedEvents.push(event),
+        systemPrompt: 'Helper',
+        permissionGate: gate,
+      })
+
+      const turnPromise = runner.runTurn({ role: 'user', content: 'Run abort tool' })
+      await new Promise(r => setTimeout(r, 50))
+
+      runner.abort()
+      await turnPromise
+
+      const toolResultEvents = capturedEvents.filter(e => e.type === 'tool_call_result')
+      expect(toolResultEvents.length).toBe(1)
+      expect(toolResultEvents[0].payload.error).toBe('Permission denied by user')
+    })
   })
 })

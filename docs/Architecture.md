@@ -142,6 +142,9 @@ async function* runTurn(session: Session, userMessage: Message) {
     if (toolCalls.length === 0) break; // model is done
 
     // Execute tools (read-only in parallel, writes serial)
+    // Each tool is checked against PermissionGate before execution.
+    // If 'ask', the runner emits permission_requested and awaits
+    // user resolution via POST /api/sessions/:id/permission.
     const results = await toolExecutor.runBatch(toolCalls, session);
     for (const r of results)
       session.appendEvent({ type: 'tool_call_result', ...r });
@@ -174,7 +177,7 @@ interface Tool<I, O> {
   description: string;              // shown to the LLM
   inputSchema: ZodSchema<I>;        // also generates the JSON schema sent to LLM
   isReadOnly: boolean;              // determines parallel vs serial execution
-  defaultPermission: 'allow' | 'ask'; // see §6
+  defaultPermission: 'allow' | 'ask' | 'conditional' | 'rule-matched'; // see §6
   call(input: I, ctx: ToolContext): AsyncGenerator<Progress, O>;
 }
 ```
@@ -326,22 +329,26 @@ const protectedBranches = ['main', 'master', 'develop', 'pocket', 'staging', 'pr
 ```
 
 `git_push` resolves `conditional`:
-- If `git rev-parse --abbrev-ref HEAD` returns a name in `protectedBranches` → **ask**
-- If detached HEAD (e.g. mid-rebase, agent shouldn't push from here anyway) → **ask**
+- If `git rev-parse --abbrev-ref HEAD` returns a name in `protectedBranches` → **deny** (hard error)
+- If detached HEAD (e.g. mid-rebase) → **deny** (hard error)
 - Otherwise → **allow**
 
-This means the agent can freely push the working branch (`pocket/{timestamp}-{slug}`) but is stopped before pushing to `main` even if it somehow checked it out. Combined with the v1 design where `git_create_branch` always creates a fresh agent branch, you should never see this prompt — but you'll see it loud and clear if something's gone wrong, which is exactly when you want a halt.
+This means the agent can freely push the working branch (`pocket/{timestamp}-{slug}`) but is blocked before pushing to `main` even if it somehow checked it out. The tool itself enforces this at runtime, not via the permission gate.
 
-The protected list is per-session-overridable via the same permissions config. If you ever want the agent to genuinely push to `main` (you won't, but), you can add a session-scoped allow.
+**Push timeout:** `git_push` uses `spawn` with a **60-second timeout** to prevent indefinite hangs on credential prompts or network stalls. If the timeout fires, the tool returns an error that the agent can surface to you.
+
+The protected list is per-session-overridable via the same permissions config.
 
 ### How "ask" works without blocking the loop
 
 When a tool needs approval, the agent emits `permission_requested` and the runner awaits a Promise. The Promise resolves when one of:
-- User clicks Allow / Deny in the client (REST POST: `/api/sessions/:id/permission`)
-- User selects "Always allow this tool for this session" (writes to `permissions.json` and resolves Allow)
-- Timeout fires (e.g. 30 minutes) — resolves Deny with reason "timeout"
+- User clicks Allow / Deny / Always Allow in the client (REST POST: `/api/sessions/:id/permission`)
+- User selects "Always allow this tool for this session" — writes to `permissions.json`, sets a session-scoped allow rule in the `PermissionGate`, and resolves Allow
+- The turn is aborted (user clicks Stop) — all pending permissions resolve as Deny
 
 **Critical UX detail:** when the user reconnects, the client receives all unresolved `permission_requested` events as part of the replay. The UI shows them as a "pending approvals" queue, not as a single blocking modal. This is what makes "agent worked while phone was locked, now I review the queue" feel natural.
+
+**Permission persistence:** session-scoped allow rules (from "Always Allow") are saved to `~/.pocket/sessions/{id}/permissions.json` and loaded back into the `PermissionGate` on server restart. This means "Always Allow" survives server restarts for that session.
 
 ### Web push (deferred to v1.5)
 

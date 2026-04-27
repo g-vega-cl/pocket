@@ -5,8 +5,8 @@
 1. Paste repo URL
 2. Enter task description
 3. Chat: "Fix the NPE in user_service.py"
-4. Agent clones repo on first message → creates branch (pushed to origin automatically)
-5. Agent reads, fixes. Changes can be committed via the `git_commit` tool or manual button
+4. Agent clones repo on first message → creates branch
+5. Agent reads, fixes, commits via `git_commit`, and pushes via `git_push`
 6. Use "Create PR" when ready to create a pull request
 7. Continue chatting or start a new session
 
@@ -15,8 +15,8 @@
 1. Paste repo URL
 2. Enter task description
 3. Chat with detailed request
-4. Agent clones repo on first message → creates branch (pushed to origin automatically)
-5. Agent implements. Changes can be committed via the `git_commit` tool or manual button
+4. Agent clones repo on first message → creates branch
+5. Agent implements, commits via `git_commit`, and pushes via `git_push`
 6. Use "Create PR" when ready to create a pull request
 7. Continue chatting or start a new session
 

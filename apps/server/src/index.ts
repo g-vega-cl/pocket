@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 config({ path: path.resolve(__dirname, '..', '..', '..', '.env') })
 
-import { SessionManager, EventLog, ToolRegistry, AgentRunner, ProcessManager } from '@pocket/agent'
+import { SessionManager, EventLog, ToolRegistry, AgentRunner, ProcessManager, PermissionGate } from '@pocket/agent'
 import { OpenRouterProvider } from '@pocket/llm'
 import {
   readFileTool, listFilesTool, writeFileTool, editFileTool,
@@ -23,7 +23,28 @@ import {
   cloneRepo,
   initLocalRepo,
 } from '@pocket/tools'
-import type { Event } from '@pocket/core'
+import type { Event, PocketConfig } from '@pocket/core'
+import { DEFAULT_PROTECTED_BRANCHES } from '@pocket/core'
+
+function getConfig(): PocketConfig {
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '~'
+  const configPath = path.join(homeDir, '.pocket', 'config.json')
+  let config: Partial<PocketConfig> = {}
+  try {
+    if (fs.existsSync(configPath)) {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+    }
+  } catch {
+    // use defaults
+  }
+  return {
+    bashAllow: config.bashAllow ?? [],
+    bashDeny: config.bashDeny ?? [],
+    protectedBranches: config.protectedBranches ?? DEFAULT_PROTECTED_BRANCHES,
+    processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
+    maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
+  }
+}
 
 interface BuildOptions {
   sessionsDir: string
@@ -36,7 +57,13 @@ export async function buildApp(options: BuildOptions) {
   await app.register(cors, { origin: true })
 
   const eventLog = new EventLog(options.sessionsDir)
-  const sessionManager = new SessionManager(options.sessionsDir, eventLog)
+  const config = getConfig()
+  const permissionGate = new PermissionGate({
+    bashAllow: config.bashAllow,
+    bashDeny: config.bashDeny,
+    protectedBranches: config.protectedBranches,
+  })
+  const sessionManager = new SessionManager(options.sessionsDir, eventLog, permissionGate)
 
   // Event emitters per session for SSE
   const eventEmitters = new Map<string, Set<(event: Event) => void>>()
@@ -327,7 +354,9 @@ Task: ${session.task}
 Branch: ${session.branchName ?? 'N/A'}
 Status: ${session.status}
 
-Use tools to explore and make changes as needed.`
+Use tools to explore and make changes as needed.
+
+IMPORTANT: When you finish making changes, always use the git_commit tool to save them with a clear message, then use git_push to push your branch to origin. Do not just say you will commit or push — actually call the tools.`
 
     const runner = new AgentRunner({
       sessionId: id,
@@ -339,6 +368,10 @@ Use tools to explore and make changes as needed.`
       startingSeq: session.nextSeq,
       workspaceRoot,
       githubToken: session.githubToken,
+      permissionGate,
+      onPermissionAlwaysAllow: (toolName) => {
+        sessionManager.persistPermissionRule(id, toolName, 'allow')
+      },
       onEvent: (event) => {
         emitToSession(id, event)
       },
@@ -369,6 +402,99 @@ Use tools to explore and make changes as needed.`
     }
     runner.abort()
     return { ok: true }
+  })
+
+  // Resolve permission
+  app.post('/api/sessions/:id/permission', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const { permissionId, resolution, alwaysAllow } = request.body as {
+      permissionId: string
+      resolution: 'allow' | 'deny'
+      alwaysAllow?: boolean
+    }
+
+    const runner = sessionManager.getRunner(id)
+    if (!runner) {
+      return reply.status(404).send({ error: 'No active agent for this session' })
+    }
+
+    await runner.resolvePermission(permissionId, resolution, alwaysAllow)
+    return { ok: true }
+  })
+
+  // Manual commit
+  app.post('/api/sessions/:id/commit', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const { message } = request.body as { message?: string }
+
+    const session = sessionManager.getSession(id)
+    if (!session) {
+      return reply.status(404).send({ error: 'Session not found' })
+    }
+    if (!session.localPath) {
+      return reply.status(400).send({ error: 'Workspace not ready' })
+    }
+
+    try {
+      const ctx = {
+        sessionId: id,
+        workspaceRoot: session.localPath,
+        githubToken: session.githubToken,
+        resolvePath: (inputPath: string) => {
+          const resolved = path.resolve(session.localPath!, inputPath)
+          if (!resolved.startsWith(session.localPath!)) {
+            throw new Error(`Path escapes workspace: ${inputPath}`)
+          }
+          return resolved
+        },
+      }
+      const gen = gitCommitTool.call({ message: message ?? 'Manual commit' }, ctx)
+      let result = await gen.next()
+      while (!result.done) {
+        result = await gen.next()
+      }
+      return { ok: true, result: result.value }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return reply.status(500).send({ error: msg })
+    }
+  })
+
+  // Manual PR creation
+  app.post('/api/sessions/:id/pr', async (request, reply) => {
+    const { id } = request.params as { id: string }
+
+    const session = sessionManager.getSession(id)
+    if (!session) {
+      return reply.status(404).send({ error: 'Session not found' })
+    }
+    if (!session.localPath) {
+      return reply.status(400).send({ error: 'Workspace not ready' })
+    }
+
+    try {
+      const ctx = {
+        sessionId: id,
+        workspaceRoot: session.localPath,
+        githubToken: session.githubToken,
+        resolvePath: (inputPath: string) => {
+          const resolved = path.resolve(session.localPath!, inputPath)
+          if (!resolved.startsWith(session.localPath!)) {
+            throw new Error(`Path escapes workspace: ${inputPath}`)
+          }
+          return resolved
+        },
+      }
+      const gen = githubCreatePRTool.call({}, ctx)
+      let result = await gen.next()
+      while (!result.done) {
+        result = await gen.next()
+      }
+      return { ok: true, result: result.value }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      return reply.status(500).send({ error: msg })
+    }
   })
 
   // Cleanup workspaces older than 30 days for done/archived sessions

@@ -192,10 +192,10 @@ export const gitPushTool: Tool<GitPushInput, { success: boolean; branch?: string
   async *call(input: GitPushInput, ctx: ToolContext): AsyncGenerator<Progress, { success: boolean; branch?: string }> {
     yield { type: 'progress', message: 'Pushing to remote...' }
 
-    const cwd = ctx.workspaceRoot.replace(/"/g, '\\"')
+    const cwd = ctx.workspaceRoot
 
     const branch = input.branchName ||
-      execSync(`git -C "${cwd}" rev-parse --abbrev-ref HEAD`, { encoding: 'utf-8' }).trim()
+      execSync(`git -C "${cwd.replace(/"/g, '\\"')}" rev-parse --abbrev-ref HEAD`, { encoding: 'utf-8' }).trim()
 
     const protectedBranches = ['main', 'master', 'develop', 'pocket', 'staging', 'production']
 
@@ -211,17 +211,59 @@ export const gitPushTool: Tool<GitPushInput, { success: boolean; branch?: string
     // Set up remote with token if available
     if (ctx.githubToken) {
       try {
-        const remoteUrl = execSync(`git -C "${cwd}" remote get-url origin`, { encoding: 'utf-8' }).trim()
+        const remoteUrl = execSync(`git -C "${cwd.replace(/"/g, '\\"')}" remote get-url origin`, { encoding: 'utf-8' }).trim()
         if (remoteUrl.includes('github.com') && !remoteUrl.includes(`://${ctx.githubToken}@`)) {
           const authenticatedUrl = remoteUrl.replace('https://github.com', `https://${ctx.githubToken}@github.com`)
-          execSync(`git -C "${cwd}" remote set-url origin ${authenticatedUrl}`, { stdio: 'pipe' })
+          execSync(`git -C "${cwd.replace(/"/g, '\\"')}" remote set-url origin ${authenticatedUrl}`, { stdio: 'pipe' })
         }
       } catch {
         // no remote configured
       }
     }
 
-    execSync(`git -C "${cwd}" push -u origin ${branch}`, { stdio: 'pipe' })
+    // Use spawn with timeout to avoid hanging forever on credential prompts or network stalls
+    const pushResult = await new Promise<{ success: boolean; stderr: string }>((resolve, reject) => {
+      const git = spawn('git', ['-C', cwd, 'push', '-u', 'origin', branch], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+      })
+
+      let stderrBuffer = ''
+
+      git.stderr?.on('data', (data: Buffer) => {
+        stderrBuffer += data.toString()
+      })
+
+      git.stdout?.on('data', (data: Buffer) => {
+        // Git push sometimes sends info to stdout too
+        stderrBuffer += data.toString()
+      })
+
+      const timeout = setTimeout(() => {
+        git.kill()
+        reject(new Error('Push timed out after 60 seconds. Check your network or authentication.'))
+      }, 60000)
+
+      git.on('close', (code) => {
+        clearTimeout(timeout)
+        if (code === 0) {
+          resolve({ success: true, stderr: stderrBuffer })
+        } else {
+          resolve({ success: false, stderr: stderrBuffer })
+        }
+      })
+
+      git.on('error', (err) => {
+        clearTimeout(timeout)
+        reject(err)
+      })
+    })
+
+    if (!pushResult.success) {
+      const errMsg = pushResult.stderr.trim() || `git push exited with an error`
+      throw new Error(errMsg)
+    }
+
+    yield { type: 'progress', message: 'Push complete' }
     return { success: true, branch }
   },
 }

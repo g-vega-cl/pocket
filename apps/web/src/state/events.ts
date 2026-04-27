@@ -5,14 +5,6 @@ export interface Event {
   payload: Record<string, unknown>
 }
 
-export interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant'
-  content: string
-  reasoning?: string
-  timestamp: number
-}
-
 export interface ToolCallState {
   toolCallId: string
   toolName: string
@@ -21,6 +13,15 @@ export interface ToolCallState {
   result?: unknown
   error?: string
   progress?: string
+}
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  reasoning?: string
+  timestamp: number
+  toolCalls?: ToolCallState[]
 }
 
 export interface PendingPermission {
@@ -34,7 +35,6 @@ export interface PendingPermission {
 
 export interface ChatState {
   messages: ChatMessage[]
-  toolCalls: ToolCallState[]
   pendingPermissions: PendingPermission[]
   status: string
   isThinking: boolean
@@ -46,10 +46,32 @@ function makeId(): string {
   return Math.random().toString(36).substring(2, 9)
 }
 
+function getLastAssistantMessage(state: ChatState): ChatMessage | undefined {
+  for (let i = state.messages.length - 1; i >= 0; i--) {
+    if (state.messages[i].role === 'assistant') {
+      return state.messages[i]
+    }
+  }
+  return undefined
+}
+
+function ensureLastAssistantMessage(state: ChatState): ChatMessage {
+  const last = getLastAssistantMessage(state)
+  if (last) return last
+
+  const msg: ChatMessage = {
+    id: makeId(),
+    role: 'assistant',
+    content: '',
+    timestamp: Date.now(),
+  }
+  state.messages.push(msg)
+  return msg
+}
+
 export function reduceEvents(events: Event[]): ChatState {
   const state: ChatState = {
     messages: [],
-    toolCalls: [],
     pendingPermissions: [],
     status: 'creating',
     isThinking: false,
@@ -115,32 +137,40 @@ export function reduceEvents(events: Event[]): ChatState {
         }
         break
 
-      case 'tool_call_start':
-        state.toolCalls.push({
+      case 'tool_call_start': {
+        const msg = ensureLastAssistantMessage(state)
+        if (!msg.toolCalls) msg.toolCalls = []
+        msg.toolCalls.push({
           toolCallId: String(event.payload.toolCallId ?? ''),
           toolName: String(event.payload.toolName ?? ''),
           args: (event.payload.args as Record<string, unknown>) ?? {},
           status: 'running',
         })
         break
+      }
 
       case 'tool_call_progress': {
         const tcId = String(event.payload.toolCallId ?? '')
-        const msg = String(event.payload.message ?? '')
-        const tc = state.toolCalls.find(t => t.toolCallId === tcId)
-        if (tc) {
-          tc.progress = msg
+        const msg = getLastAssistantMessage(state)
+        if (msg?.toolCalls) {
+          const tc = msg.toolCalls.find(t => t.toolCallId === tcId)
+          if (tc) {
+            tc.progress = String(event.payload.message ?? '')
+          }
         }
         break
       }
 
       case 'tool_call_result': {
         const tcId = String(event.payload.toolCallId ?? '')
-        const tc = state.toolCalls.find(t => t.toolCallId === tcId)
-        if (tc) {
-          tc.status = event.payload.error ? 'error' : 'done'
-          tc.result = event.payload.result
-          tc.error = event.payload.error as string | undefined
+        const msg = getLastAssistantMessage(state)
+        if (msg?.toolCalls) {
+          const tc = msg.toolCalls.find(t => t.toolCallId === tcId)
+          if (tc) {
+            tc.status = event.payload.error ? 'error' : 'done'
+            tc.result = event.payload.result
+            tc.error = event.payload.error as string | undefined
+          }
         }
         break
       }

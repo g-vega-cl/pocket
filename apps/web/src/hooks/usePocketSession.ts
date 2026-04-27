@@ -8,7 +8,6 @@ import type { SessionDetail, SessionListItem } from '#/lib/api.js'
 export function usePocketSession(sessionId: string | null) {
   const [chatState, setChatState] = useState<ChatState>({
     messages: [],
-    toolCalls: [],
     pendingPermissions: [],
     status: 'creating',
     isThinking: false,

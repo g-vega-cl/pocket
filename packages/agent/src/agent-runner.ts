@@ -3,6 +3,7 @@ import type { LLMProvider, LLMChunk } from '@pocket/core'
 import path from 'node:path'
 import type { EventLog } from './event-log.js'
 import type { ToolRegistry } from './tool-registry.js'
+import type { PermissionGate } from './permission-gate.js'
 
 interface AgentRunnerOptions {
   sessionId: string
@@ -16,6 +17,8 @@ interface AgentRunnerOptions {
   workspaceRoot?: string
   githubToken?: string
   onEvent?: (event: Event) => void
+  permissionGate?: PermissionGate
+  onPermissionAlwaysAllow?: (toolName: string) => void
 }
 
 export class AgentRunner {
@@ -31,6 +34,12 @@ export class AgentRunner {
   private onEvent?: (event: Event) => void
   private workspaceRoot: string
   private githubToken?: string
+  private permissionGate?: PermissionGate
+  private onPermissionAlwaysAllow?: (toolName: string) => void
+  private pendingPermissions = new Map<string, {
+    resolve: (allowed: boolean) => void
+    toolName: string
+  }>()
 
   constructor(options: AgentRunnerOptions) {
     this.sessionId = options.sessionId
@@ -45,10 +54,34 @@ export class AgentRunner {
     this.onEvent = options.onEvent
     this.workspaceRoot = options.workspaceRoot ?? ''
     this.githubToken = options.githubToken
+    this.permissionGate = options.permissionGate
+    this.onPermissionAlwaysAllow = options.onPermissionAlwaysAllow
   }
 
   abort(): void {
     this.abortController.abort()
+    // Reject all pending permissions so the turn doesn't hang
+    for (const [permissionId, { resolve }] of this.pendingPermissions) {
+      resolve(false)
+      this.pendingPermissions.delete(permissionId)
+    }
+  }
+
+  async resolvePermission(
+    permissionId: string,
+    resolution: 'allow' | 'deny',
+    alwaysAllow?: boolean,
+  ): Promise<void> {
+    const p = this.pendingPermissions.get(permissionId)
+    if (!p) return
+
+    if (resolution === 'allow' && alwaysAllow) {
+      this.permissionGate?.setSessionRule(this.sessionId, p.toolName, 'allow')
+      this.onPermissionAlwaysAllow?.(p.toolName)
+    }
+
+    this.pendingPermissions.delete(permissionId)
+    p.resolve(resolution === 'allow')
   }
 
   getSessionId(): string {
@@ -396,6 +429,78 @@ export class AgentRunner {
         toolCallId: tc.id,
         toolName: tc.function.name,
         error: `Invalid arguments: ${validation.error.message}`,
+      }
+    }
+
+    // ─── Permission check ─────────────────────────────────────
+    if (this.permissionGate) {
+      let permResult: { resolution: 'allow' | 'ask' | 'deny'; reason?: string }
+
+      if (tc.function.name === 'bash') {
+        const command = (args.command as string) ?? ''
+        permResult = this.permissionGate.checkBashCommand(command, this.sessionId)
+      } else {
+        permResult = this.permissionGate.checkPermission({
+          tool,
+          toolName: tc.function.name,
+          args,
+          sessionId: this.sessionId,
+          workspaceRoot: this.workspaceRoot,
+        })
+      }
+
+      if (permResult.resolution === 'deny') {
+        return {
+          toolCallId: tc.id,
+          toolName: tc.function.name,
+          error: permResult.reason ?? 'Permission denied',
+        }
+      }
+
+      if (permResult.resolution === 'ask') {
+        const permissionId = `perm_${this.seq}_${tc.id}`
+
+        this.emit({
+          type: 'permission_requested',
+          payload: {
+            permissionId,
+            toolName: tc.function.name,
+            toolCallId: tc.id,
+            args,
+            reason: permResult.reason ?? `Permission required for ${tc.function.name}`,
+          },
+        })
+
+        this.emit({
+          type: 'status',
+          payload: { status: 'awaiting_permission' },
+        })
+
+        const allowed = await new Promise<boolean>((resolve) => {
+          this.pendingPermissions.set(permissionId, { resolve, toolName: tc.function.name })
+        })
+
+        this.emit({
+          type: 'permission_resolved',
+          payload: {
+            permissionId,
+            toolName: tc.function.name,
+            resolution: allowed ? 'allow' : 'deny',
+          },
+        })
+
+        this.emit({
+          type: 'status',
+          payload: { status: 'working' },
+        })
+
+        if (!allowed) {
+          return {
+            toolCallId: tc.id,
+            toolName: tc.function.name,
+            error: 'Permission denied by user',
+          }
+        }
       }
     }
 
