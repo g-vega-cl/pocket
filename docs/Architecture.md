@@ -1,5 +1,24 @@
 # Architecture
 
+## Error Handling
+
+The server implements multi-layered error handling to prevent crashes:
+
+### 1. Global Exception Handlers (`server/index.js`)
+- **uncaughtException**: Catches fatal uncaught exceptions, logs with stack trace, attempts graceful shutdown (10s timeout), then exits with code 1
+- **unhandledRejection**: Catches unhandled promise rejections, logs error but doesn't crash (recovery mode)
+
+### 2. Tool Function Resilience (`server/tools/`)
+- **git.js**: All git operations (clone, init, branch, commit, push, status) wrapped in try-catch with proper error logging
+- **file.js**: File operations return errors instead of throwing, listFiles returns empty array on error
+- **command.js**: Commands return error objects with success=false instead of throwing
+
+### 3. Auto-Restart Mechanism
+- Parent process spawns child Node process
+- Monitors for non-zero exit codes
+- Auto-restarts after 3 seconds if crashed
+- Uses `POCKET_CHILD` env var to prevent infinite spawn loops
+
 ## Networking & Deployment
 
 ### Local Development

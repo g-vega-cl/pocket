@@ -12,16 +12,24 @@ async function cleanupTempDirs(maxAgeMs = 7 * 24 * 60 * 60 * 1000) {
   const tempDir = getTempDir();
   if (!existsSync(tempDir)) return;
 
-  const entries = readdirSync(tempDir, { withFileTypes: true });
-  const now = Date.now();
+  try {
+    const entries = readdirSync(tempDir, { withFileTypes: true });
+    const now = Date.now();
 
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
-    const fullPath = join(tempDir, entry.name);
-    const stats = statSync(fullPath);
-    if (now - stats.mtimeMs > maxAgeMs) {
-      rmSync(fullPath, { recursive: true, force: true });
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue;
+      const fullPath = join(tempDir, entry.name);
+      try {
+        const stats = statSync(fullPath);
+        if (now - stats.mtimeMs > maxAgeMs) {
+          rmSync(fullPath, { recursive: true, force: true });
+        }
+      } catch (e) {
+        // Ignore errors reading individual entries
+      }
     }
+  } catch (e) {
+    console.error('[Git] Error cleaning up temp dirs:', e.message);
   }
 }
 
@@ -52,105 +60,147 @@ function slugify(text) {
 
 async function gitClone(repoUrl, token = process.env.GITHUB_TOKEN, timeoutMs = 300000) {
   ensureTempDir();
-  const { owner, repo } = parseRepoInfo(repoUrl);
-  const destName = `${owner}-${repo}-${randomUUID().substring(0, 8)}`;
-  const localPath = join(getTempDir(), destName);
+  
+  try {
+    const { owner, repo } = parseRepoInfo(repoUrl);
+    const destName = `${owner}-${repo}-${randomUUID().substring(0, 8)}`;
+    const localPath = join(getTempDir(), destName);
 
-  if (existsSync(localPath)) {
-    execSync(`rm -rf ${localPath}`);
-  }
-
-  const effectiveToken = token || process.env.GITHUB_TOKEN;
-  let authenticatedUrl = repoUrl;
-  if (effectiveToken && repoUrl.includes('github.com')) {
-    authenticatedUrl = repoUrl.replace('https://github.com', `https://${effectiveToken}@github.com`);
-  }
-
-  return new Promise((resolve, reject) => {
-    const start = Date.now();
-    const git = spawn('git', ['clone', authenticatedUrl, localPath], { stdio: 'inherit' });
-
-    const timeout = setTimeout(() => {
-      git.kill();
-      reject(new Error(`Clone timed out after ${timeoutMs / 1000}s`));
-    }, timeoutMs);
-
-    git.on('close', (code) => {
-      clearTimeout(timeout);
-      if (code === 0) {
-        resolve({ localPath, owner, repo });
-      } else {
-        reject(new Error(`git clone exited with code ${code}`));
+    if (existsSync(localPath)) {
+      try {
+        rmSync(localPath, { recursive: true, force: true });
+      } catch (e) {
+        // Ignore cleanup errors
       }
-    });
+    }
 
-    git.on('error', (err) => {
-      clearTimeout(timeout);
-      reject(err);
+    const effectiveToken = token || process.env.GITHUB_TOKEN;
+    let authenticatedUrl = repoUrl;
+    if (effectiveToken && repoUrl.includes('github.com')) {
+      authenticatedUrl = repoUrl.replace('https://github.com', `https://${effectiveToken}@github.com`);
+    }
+
+    return new Promise((resolve, reject) => {
+      const git = spawn('git', ['clone', authenticatedUrl, localPath], { 
+        stdio: 'inherit',
+      });
+
+      const timeout = setTimeout(() => {
+        git.kill();
+        reject(new Error(`Clone timed out after ${timeoutMs / 1000}s`));
+      }, timeoutMs);
+
+      git.on('close', (code) => {
+        clearTimeout(timeout);
+        if (code === 0) {
+          resolve({ localPath, owner, repo });
+        } else {
+          reject(new Error(`git clone exited with code ${code}`));
+        }
+      });
+
+      git.on('error', (err) => {
+        clearTimeout(timeout);
+        reject(err);
+      });
     });
-  });
+  } catch (error) {
+    console.error('[Git] Clone failed:', error.message);
+    throw error;
+  }
 }
 
 async function gitInit() {
   ensureTempDir();
-  const destName = `local-${randomUUID().substring(0, 8)}`;
-  const localPath = join(getTempDir(), destName);
+  
+  try {
+    const destName = `local-${randomUUID().substring(0, 8)}`;
+    const localPath = join(getTempDir(), destName);
 
-  if (existsSync(localPath)) {
-    execSync(`rm -rf ${localPath}`);
+    if (existsSync(localPath)) {
+      try {
+        rmSync(localPath, { recursive: true, force: true });
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+    }
+
+    mkdirSync(localPath, { recursive: true });
+    execSync(`git -C ${localPath} init`, { stdio: 'inherit' });
+    execSync(`git -C ${localPath} config user.email "pocket-agent@local"`, { stdio: 'inherit' });
+    execSync(`git -C ${localPath} config user.name "Pocket Agent"`, { stdio: 'inherit' });
+
+    return { localPath };
+  } catch (error) {
+    console.error('[Git] Init failed:', error.message);
+    throw error;
   }
-
-  mkdirSync(localPath, { recursive: true });
-  execSync(`git -C ${localPath} init`, { stdio: 'inherit' });
-  execSync(`git -C ${localPath} config user.email "pocket-agent@local"`, { stdio: 'inherit' });
-  execSync(`git -C ${localPath} config user.name "Pocket Agent"`, { stdio: 'inherit' });
-
-  return { localPath };
 }
 
 async function gitCreateBranch(localPath, taskDescription) {
-  const slug = slugify(taskDescription);
-  const timestamp = Math.floor(Date.now() / 1000);
-  const branchName = `pocket/${timestamp}-${slug}`;
+  try {
+    const slug = slugify(taskDescription);
+    const timestamp = Math.floor(Date.now() / 1000);
+    const branchName = `pocket/${timestamp}-${slug}`;
 
-  execSync(`git -C ${localPath} checkout -b ${branchName}`, { stdio: 'inherit' });
+    execSync(`git -C ${localPath} checkout -b ${branchName}`, { stdio: 'inherit' });
 
-  return { branchName };
+    return { branchName };
+  } catch (error) {
+    console.error('[Git] Create branch failed:', error.message);
+    throw error;
+  }
 }
 
 async function gitCommit(localPath, message) {
-  execSync(`git -C ${localPath} add -A`, { stdio: 'inherit' });
   try {
-    execSync(`git -C ${localPath} commit -m "${message.replace(/"/g, '\\"')}"`, { stdio: 'inherit' });
-  } catch (e) {
-    if (e.stderr?.toString().includes('nothing to commit')) {
-      return { message: 'No changes to commit' };
+    execSync(`git -C ${localPath} add -A`, { stdio: 'inherit' });
+    
+    const safeMessage = message.replace(/"/g, '\\"');
+    try {
+      execSync(`git -C ${localPath} commit -m "${safeMessage}"`, { stdio: 'inherit' });
+    } catch (e) {
+      const stderr = e.stderr?.toString() || e.message || '';
+      if (stderr.includes('nothing to commit') || stderr.includes('no changes added')) {
+        return { message: 'No changes to commit' };
+      }
+      throw e;
     }
-    throw e;
+    return { success: true };
+  } catch (error) {
+    console.error('[Git] Commit failed:', error.message);
+    throw error;
   }
-  return { success: true };
 }
 
 async function gitPush(localPath, branchName, token = process.env.GITHUB_TOKEN) {
-  // Defensive: fall back to current branch if none provided
-  const effectiveBranch = branchName || execSync(`git -C ${localPath} rev-parse --abbrev-ref HEAD`).toString().trim();
+  try {
+    const effectiveBranch = branchName || execSync(`git -C ${localPath} rev-parse --abbrev-ref HEAD`).toString().trim();
 
-  let remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
+    let remoteUrl = execSync(`git -C ${localPath} remote get-url origin`).toString().trim();
 
-  const effectiveToken = token || process.env.GITHUB_TOKEN;
-  if (effectiveToken && remoteUrl.includes('github.com') && !remoteUrl.includes(`://${effectiveToken}@`)) {
-    // Inject token if not already present
-    const authenticatedUrl = remoteUrl.replace('https://github.com', `https://${effectiveToken}@github.com`);
-    execSync(`git -C ${localPath} remote set-url origin ${authenticatedUrl}`);
+    const effectiveToken = token || process.env.GITHUB_TOKEN;
+    if (effectiveToken && remoteUrl.includes('github.com') && !remoteUrl.includes(`://${effectiveToken}@`)) {
+      const authenticatedUrl = remoteUrl.replace('https://github.com', `https://${effectiveToken}@github.com`);
+      execSync(`git -C ${localPath} remote set-url origin ${authenticatedUrl}`);
+    }
+
+    execSync(`git -C ${localPath} push -u origin ${effectiveBranch}`, { stdio: 'inherit' });
+    return { success: true };
+  } catch (error) {
+    console.error('[Git] Push failed:', error.message);
+    throw error;
   }
-
-  execSync(`git -C ${localPath} push -u origin ${effectiveBranch}`, { stdio: 'inherit' });
-  return { success: true };
 }
 
 async function gitStatus(localPath) {
-  const output = execSync(`git -C ${localPath} status --porcelain`).toString();
-  return { dirty: output.trim().length > 0 };
+  try {
+    const output = execSync(`git -C ${localPath} status --porcelain`, { stdio: 'pipe', encoding: 'utf-8' });
+    return { dirty: output.trim().length > 0 };
+  } catch (error) {
+    console.error('[Git] Status failed:', error.message);
+    return { dirty: false };
+  }
 }
 
 export {

@@ -45,7 +45,7 @@ export function PocketApp() {
   const [githubToken, setGithubToken] = useState('')
   const [inputValue, setInputValue] = useState('')
   const [sessionIdInput, setSessionIdInput] = useState('')
-  const [selectedModel, setSelectedModel] = useState('stepfun/step-3.5-flash')
+  const [selectedModel, setSelectedModel] = useState('xiaomi/mimo-v2-flash')
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
@@ -646,7 +646,7 @@ export function PocketApp() {
                 type="text"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
-                placeholder="Model (e.g. stepfun/step-3.5-flash)"
+                placeholder="Model (e.g. xiaomi/mimo-v2-flash)"
                 className="flex-1 px-3 py-1 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-sm"
               />
             </div>

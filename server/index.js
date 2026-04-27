@@ -11,7 +11,7 @@ import { readFile, writeFile } from './tools/file.js';
 import { runCommand } from './tools/command.js';
 import { createPullRequest } from './tools/github.js';
 import { buildSystemMessage, streamChat } from './llm.js';
-import { execSync } from 'child_process';
+import { execSync, spawn } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -457,9 +457,77 @@ app.post('/api/clone', async (req, res) => {
 
 loadSessionsFromDisk();
 
-server.listen(PORT, () => {
-  console.log(`Pocket server running on port ${PORT}`);
+// ============================================================
+// Global Error Handlers (Phase 1: Prevent Server Crashes)
+// ============================================================
+
+process.on('uncaughtException', (err, origin) => {
+  console.error('[FATAL] Uncaught Exception:', err);
+  console.error('[FATAL] Exception origin:', origin);
+  console.error('[FATAL] Stack:', err?.stack);
+  
+  // Graceful shutdown - let current requests finish then exit
+  console.log('[FATAL] Shutting down gracefully...');
+  server.close(() => {
+    console.log('[FATAL] Server closed. Exiting with code 1.');
+    process.exit(1);
+  });
+  
+  // Force exit after 10 seconds if graceful shutdown fails
+  setTimeout(() => {
+    console.error('[FATAL] Forced exit after graceful shutdown timeout');
+    process.exit(1);
+  }, 10000);
 });
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[ERROR] Unhandled Rejection at:', promise);
+  console.error('[ERROR] Reason:', reason);
+  if (reason instanceof Error) {
+    console.error('[ERROR] Stack:', reason.stack);
+  }
+  // Don't exit on unhandled rejection - try to recover
+});
+
+// ============================================================
+// Auto-Restart Script (Phase 3)
+// ============================================================
+
+const isChildProcess = process.env.POCKET_CHILD === 'true';
+
+function spawnServer() {
+  console.log('[AutoRestart] Starting server process...');
+  const child = spawn('node', [__filename], {
+    stdio: 'inherit',
+    env: { ...process.env, POCKET_CHILD: 'true' },
+  });
+  
+  child.on('exit', (code, signal) => {
+    console.log(`[AutoRestart] Server exited with code ${code}, signal ${signal}`);
+    
+    if (code !== 0 && code !== null) {
+      console.log('[AutoRestart] Server crashed, restarting in 3 seconds...');
+      setTimeout(spawnServer, 3000);
+    }
+  });
+  
+  child.on('error', (err) => {
+    console.error('[AutoRestart] Server process error:', err);
+  });
+  
+  return child;
+}
+
+// Only start the server normally if not running as child process
+if (isChildProcess) {
+  console.log('[AutoRestart] Running as child process, starting server...');
+  server.listen(PORT, () => {
+    console.log(`Pocket server running on port ${PORT}`);
+  });
+} else {
+  console.log('[AutoRestart] Running as parent, spawning server...');
+  spawnServer();
+}
 
 // Export for testing
 export { executeTool };

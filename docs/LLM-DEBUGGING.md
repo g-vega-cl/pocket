@@ -247,6 +247,35 @@ The system prompt in `server/llm.js` now includes explicit rules to prevent infi
 3. Do NOT loop - after exploring, answer the user's question directly
 ```
 
+## LLM Configuration
+
+### MAX_TOKENS
+
+The `max_tokens` parameter controls the maximum length of the LLM's response. It is set in `server/llm.js`:
+
+```javascript
+max_tokens: 16384,
+```
+
+**Recommended values:**
+- `4096` - Default, may truncate longer responses
+- `8192` - Good for most tasks
+- `16384` - Recommended for complex tasks requiring detailed responses
+
+**Signs you need to increase MAX_TOKENS:**
+- `finishReason: 'length'` in server logs — LLM hit token limit
+- Responses appear truncated or end mid-sentence
+- Messages show empty `content` with only `tool_calls`
+
+### Model Configuration
+
+The default model is set in `server/llm.js`:
+```javascript
+const DEFAULT_MODEL = 'stepfun/step-3.5-flash';
+```
+
+To change the model, update the `DEFAULT_MODEL` constant or pass a different model when calling `streamChat()`.
+
 ## Troubleshooting Steps
 
 1. **Check Server Logs**: Look for `[LLM]` entries in the server console

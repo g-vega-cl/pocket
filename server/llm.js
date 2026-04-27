@@ -232,7 +232,7 @@ async function streamChat(messages, onChunk, onToolCall, executeTool, onRaw, onS
         messages: reqMessages,
         tools: buildToolDefinitions(),
         stream: true,
-        max_tokens: 4096,
+        max_tokens: 16384,
       }),
     });
 
