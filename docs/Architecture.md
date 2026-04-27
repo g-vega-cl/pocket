@@ -1,6 +1,8 @@
 # Pocket — Architecture (v1)
 
 > A self-hosted coding agent you drive from your phone. The server runs on your home machine and exposes a tunneled web client. The agent works on your repos, opens PRs, and keeps going while your phone is locked.
+>
+> **Status: implemented.** This document describes the system as built. Sections marked `[plan]` were design rationale written before implementation.
 
 ---
 
@@ -34,7 +36,7 @@ These are not platitudes — every decision in this doc traces back to one of th
 │                                                              │
 │   ┌───────────────────┐    ┌──────────────────────────────┐  │
 │   │  HTTP layer        │   │  SessionManager              │  │
-│   │  (Fastify/Express) │──►│  (in-memory map, owns        │  │
+│   │  (Fastify)          │──►│  (in-memory map, owns        │  │
 │   │  REST + SSE        │   │   AgentRunner instances)     │  │
 │   └───────────────────┘    └──────────┬───────────────────┘  │
 │                                       │ owns                  │
@@ -119,7 +121,7 @@ Event types (v1, deliberately small):
 This is the heart. It is intentionally a small, readable async generator.
 
 ```ts
-// pseudo-code, not final
+// The AgentRunner in packages/agent/src/agent-runner.ts
 async function* runTurn(session: Session, userMessage: Message) {
   session.appendEvent({ type: 'user_message', content: userMessage });
   session.setStatus('working');
@@ -540,29 +542,22 @@ This logic lives in `OpenRouterProvider`, not in the agent loop. The loop only s
 
 ## 11. Frontend (TanStack Start)
 
-Project structure stays in your existing monorepo:
-
 ```
 apps/web/
   src/
     routes/
       index.tsx              ← session list / new session form
-      sessions/$id.tsx       ← active chat UI
+      sessions/$id.tsx       ← active chat UI (components inlined)
     state/
-      session.ts             ← Zustand or signals store, fed by SSE
       events.ts              ← reducer: events[] → derived UI state
     hooks/
       useSessionStream.ts    ← EventSource wrapper, handles reconnect/replay
-      useApi.ts              ← typed fetch wrapper for REST endpoints
-    components/
-      MessageList.tsx
-      MessageBubble.tsx
-      ToolCallCard.tsx       ← collapsed tool calls with expand-to-see-output
-      PermissionPrompt.tsx   ← "agent wants to run bash: `npm test`"
-      PendingApprovals.tsx   ← queue when reconnecting after disconnect
-      Composer.tsx
-      StatusBadge.tsx        ← thinking / working / idle / awaiting-permission
+      usePocketSession.ts    ← main hook combining SSE + REST
+    lib/
+      api.ts                 ← typed fetch wrapper for REST endpoints
 ```
+
+Components (`StatusBadge`, `ToolCallCard`, `PermissionPrompt`) are co-located in `sessions/$id.tsx` — extraction into separate files is deferred until the component count warrants it.
 
 ### Two important UI principles
 
@@ -640,22 +635,25 @@ If you ever want to know *who* made a request (e.g. for multi-user later), Cloud
 
 ## 14. Project layout
 
-Single-process, single-port, served as one Node app. Monorepo stays Nx for consistency with your other work, but the apps are dirt simple:
+Single-process, single-port, served as one Node app. Monorepo uses pnpm workspaces:
 
 ```
 pocket/
 ├── apps/
-│   ├── web/               ← TanStack Start frontend
-│   └── server/            ← Node API + agent runtime
+│   ├── web/               ← TanStack Start frontend (Vite dev, Netlify SSR)
+│   └── server/            ← Fastify API + agent runtime (tsx in dev, tsc for prod)
 ├── packages/
-│   ├── core/              ← shared types: Event, Tool, Message, Session
-│   ├── agent/             ← AgentRunner, query loop, tool executor, permissions
-│   ├── tools/             ← all tool implementations (one file each)
-│   └── llm/               ← provider abstraction, OpenRouter client
-└── README.md
+│   ├── core/              ← shared types: Event, Tool, Message, Session (zod)
+│   ├── agent/             ← AgentRunner, SessionManager, EventLog, PermissionGate,
+│   │                         ProcessManager, TokenCounter, RingBuffer
+│   ├── tools/             ← 20 tool implementations (one file per tool or group)
+│   └── llm/               ← OpenRouterProvider, stream normalization
+└── docs/
+    ├── Architecture.md
+    └── UserStories.md
 ```
 
-`apps/server/` is a thin shell: it sets up Fastify, mounts routes, instantiates `SessionManager` from `packages/agent`, and serves `apps/web/dist` for static files. All the meat is in `packages/`.
+`apps/server/` is a thin shell: it sets up Fastify, mounts routes, instantiates `SessionManager` from `packages/agent`, registers all tools from `packages/tools`, and runs the agent loop. All the meat is in `packages/`.
 
 ---
 
@@ -672,43 +670,39 @@ These have a designed-in seam but no implementation:
 
 ---
 
-## 16. Build order — concrete v1 milestones
+## 16. Build order — v1 milestones (completed)
 
-Each milestone is independently shippable and testable.
+Each milestone was independently shippable and testable.
 
-**M1 — Loop and persistence (~3 days)**
+**M1 — Loop and persistence** ✓
 - `core` types, event log writer, SessionManager, AgentRunner with the query loop
 - One tool: `read_file`. No permissions yet.
-- CLI smoke test: send a message via curl, see SSE events, see `events.jsonl` grow
 
-**M2 — Web client (~3 days)**
+**M2 — Web client** ✓
 - TanStack Start app, session list, chat view
 - SSE hook with reconnect/replay
 - Composer, message rendering from event log
 
-**M3 — Tools and permissions (~4 days)**
-- Implement the v1 foreground tool inventory (excluding background)
+**M3 — Tools and permissions** ✓
+- All v1 foreground tools (read, write, edit, grep, glob, web, git-ro, bash, plan, todos)
 - Permission gate, conditional rules, "ask" UX in the client
 - Bash matchers (allow/deny regex engine)
 - Pending-approvals queue when reconnecting
 
-**M4 — Git/GitHub integration (~2 days)**
+**M4 — Git/GitHub integration** ✓
 - Workspace cloning, branch/commit/push tools, PR creation
 - Protected-branch check for `git_push`
-- Manual commit/PR buttons in UI
 
-**M5 — Background processes (~3 days)**
-- ProcessManager, ring buffers, the four bash_background tools
-- Foreground bash timeout
-- PID persistence, startup sweep for stale PIDs
-- UI: process list panel showing what's running per session
+**M5 — Background processes** ✓
+- ProcessManager, ring buffers, five bash_background tools
+- Foreground bash timeout (5 min)
+- Session-wide cap (8 processes)
 
-**M6 — Hardening (~2 days)**
-- Token cap + new-session-with-context
-- Crash recovery on server restart (sessions + processes)
-- End-to-end test on the tunnel
-
-About 2.5 weeks of focused work for v1. Everything beyond is iteration.
+**M6 — Hardening** ✓
+- Token cap (warn at 75%, block at 90%)
+- Crash recovery on server restart (working → interrupted)
+- 30-day workspace cleanup for done/archived sessions
+- SSE heartbeats every 15s
 
 ---
 
@@ -725,10 +719,16 @@ This is one of the things the event-log architecture makes free: deep linking, m
 
 ---
 
-## 18. Open questions for you
+## 18. Resolved and open questions
 
-All major design questions are resolved. Remaining items are small choices you can defer until you hit them:
+Resolved during implementation:
+1. **Bash allow rules** — regex matchers are in `PermissionGate.checkBashCommand()`. Rules are loaded from `~/.pocket/config.json`. The deny list always wins, even over session-scoped allows.
+2. **Process buffer size** — 4MB per stream per process. 8 processes × 2 streams × 4MB = 64MB worst case. Configurable via `processBufferSize` in config.
+3. **Foreground bash timeout** — 5 minutes. On timeout, the process gets SIGTERM and the tool returns `{ timedOut: true }`.
+4. **HTTP framework** — Fastify (not Express). Chosen for better SSE support and performance.
+5. **Monorepo tool** — pnpm workspaces (not Nx). Simpler, fewer dependencies, already working.
 
-1. **Bash allow rules** — extend the matchers in §6 as you find commands you run constantly (Nx variants, Rspack/Vite tasks, formatters with project-specific configs).
-2. **Process buffer size** — set to 4MB per stream per process for now. If memory pressure ever shows up (8 processes × 2 streams × 4MB = 64MB worst case, which is fine), tune down. If you find logs scrolling out of the buffer on long-running watchers, tune up.
-3. **Foreground bash timeout** — defaulted to 5 minutes. If you find the agent regularly hitting this on legitimate commands (slow test suites?), bump it.
+Still open:
+- **Web push** — deferred to v1.5 per §6.
+- **Compaction** — token cap only in v1. Real compaction (compact_marker events, summary injection) is v1.5.
+- **Background process UI** — process list panel in the chat view is implemented as a flat list; a richer panel with per-process controls is deferred.

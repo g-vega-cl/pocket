@@ -19,10 +19,6 @@ const config = defineConfig({
         target: 'http://localhost:5173',
         changeOrigin: true,
       },
-      '/ws': {
-        target: 'http://localhost:5173',
-        ws: true,
-      },
     },
   },
   plugins: [

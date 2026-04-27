@@ -1,0 +1,463 @@
+import type { Event, Message, ToolCall, ToolContext, Progress } from '@pocket/core'
+import type { LLMProvider, LLMChunk } from '@pocket/core'
+import path from 'node:path'
+import type { EventLog } from './event-log.js'
+import type { ToolRegistry } from './tool-registry.js'
+
+interface AgentRunnerOptions {
+  sessionId: string
+  provider: LLMProvider
+  eventLog: EventLog
+  tools: ToolRegistry
+  model: string
+  systemPrompt?: string
+  maxTurns?: number
+  startingSeq?: number
+  workspaceRoot?: string
+  githubToken?: string
+  onEvent?: (event: Event) => void
+}
+
+export class AgentRunner {
+  private sessionId: string
+  private provider: LLMProvider
+  private eventLog: EventLog
+  private tools: ToolRegistry
+  private model: string
+  private systemPrompt: string
+  private maxTurns: number
+  private abortController: AbortController
+  private seq: number
+  private onEvent?: (event: Event) => void
+  private workspaceRoot: string
+  private githubToken?: string
+
+  constructor(options: AgentRunnerOptions) {
+    this.sessionId = options.sessionId
+    this.provider = options.provider
+    this.eventLog = options.eventLog
+    this.tools = options.tools
+    this.model = options.model
+    this.systemPrompt = options.systemPrompt ?? 'You are Pocket, an autonomous coding agent.'
+    this.maxTurns = options.maxTurns ?? 50
+    this.abortController = new AbortController()
+    this.seq = options.startingSeq ?? 1
+    this.onEvent = options.onEvent
+    this.workspaceRoot = options.workspaceRoot ?? ''
+    this.githubToken = options.githubToken
+  }
+
+  abort(): void {
+    this.abortController.abort()
+  }
+
+  getSessionId(): string {
+    return this.sessionId
+  }
+
+  getSeq(): number {
+    return this.seq
+  }
+
+  get isAborted(): boolean {
+    return this.abortController.signal.aborted
+  }
+
+  async runTurn(userMessage: { role: 'user'; content: string }): Promise<void> {
+    // Emit user message event
+    this.emit({
+      type: 'user_message',
+      payload: { content: userMessage.content },
+    })
+
+    this.emit({
+      type: 'status',
+      payload: { status: 'working' },
+    })
+
+    let turnCount = 0
+
+    try {
+      while (turnCount < this.maxTurns && !this.abortController.signal.aborted) {
+        const messages = this.buildMessages(userMessage)
+        const toolDefs = this.tools.toDefinitions()
+
+        let assistantText = ''
+        let reasoning = ''
+        const toolCalls: ToolCall[] = []
+
+        const stream = this.provider.streamChat({
+          model: this.model,
+          messages,
+          tools: toolDefs.length > 0 ? toolDefs : undefined,
+        })
+
+        let usageResult = null
+        let streamResult = await stream.next()
+
+        while (!streamResult.done && !this.abortController.signal.aborted) {
+          const chunk: LLMChunk = streamResult.value
+
+          if (chunk.type === 'text' && chunk.text) {
+            assistantText += chunk.text
+            this.emit({
+              type: 'assistant_text_delta',
+              payload: { text: chunk.text },
+            })
+          } else if (chunk.type === 'reasoning' && chunk.reasoning) {
+            reasoning += chunk.reasoning
+            // Reasoning is emitted as text delta with reasoning field
+            this.emit({
+              type: 'assistant_text_delta',
+              payload: { text: '', reasoning: chunk.reasoning },
+            })
+          } else if (chunk.type === 'tool_call' && chunk.toolCall) {
+            const tc = chunk.toolCall
+            toolCalls.push({
+              id: tc.id,
+              type: 'function',
+              function: {
+                name: tc.name,
+                arguments: tc.arguments,
+              },
+            })
+          }
+
+          streamResult = await stream.next()
+        }
+
+        usageResult = streamResult.value
+
+        // Emit assistant text done
+        this.emit({
+          type: 'assistant_text_done',
+          payload: { text: assistantText, reasoning: reasoning || undefined },
+        })
+
+        // If no tool calls, break
+        if (toolCalls.length === 0) {
+          break
+        }
+
+        turnCount++
+
+        // Execute tools
+        const results = await this.executeTools(toolCalls)
+
+        // Emit tool call results
+        for (const result of results) {
+          this.emit({
+            type: 'tool_call_result',
+            payload: {
+              toolCallId: result.toolCallId,
+              toolName: result.toolName,
+              result: result.result,
+              error: result.error,
+            },
+          })
+        }
+      }
+
+      // Check if we hit the turn cap
+      if (turnCount >= this.maxTurns) {
+        this.emit({
+          type: 'status',
+          payload: { status: 'idle', message: 'Turn limit reached' },
+        })
+      }
+
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+
+      if (this.abortController.signal.aborted) {
+        this.emit({
+          type: 'status',
+          payload: { status: 'idle', message: 'Aborted' },
+        })
+      } else {
+        this.emit({
+          type: 'status',
+          payload: { status: 'error', message },
+        })
+      }
+      return
+    }
+
+    if (!this.abortController.signal.aborted) {
+      this.emit({
+        type: 'status',
+        payload: { status: 'idle' },
+      })
+    }
+  }
+
+  private buildMessages(userMessage: { role: 'user'; content: string }): Message[] {
+    const messages: Message[] = []
+
+    // System prompt
+    if (this.systemPrompt) {
+      messages.push({
+        role: 'system',
+        content: this.systemPrompt,
+      })
+    }
+
+    // Replay events to reconstruct conversation history
+    const events = this.eventLog.replaySync(this.sessionId)
+    const toolResultsMap = new Map<string, string>()
+
+    for (const event of events) {
+      switch (event.type) {
+        case 'user_message':
+          messages.push({
+            role: 'user',
+            content: event.payload.content,
+          })
+          break
+
+        case 'assistant_text_done': {
+          // Find the tool calls between this and the previous user message
+          // For now, just add the assistant message
+          const assistantMsg: Message = {
+            role: 'assistant',
+            content: event.payload.text || null,
+          }
+
+          // Look for tool calls that happened around this turn
+          // We'll match tool_call_result events to add tool messages
+          messages.push(assistantMsg)
+          break
+        }
+
+        case 'tool_call_start':
+          // We handle tool calls via the assistant text done + tool_call_result pattern
+          break
+
+        case 'tool_call_result':
+          // Store tool results to add after the corresponding assistant message
+          toolResultsMap.set(event.payload.toolCallId, JSON.stringify(
+            event.payload.error ? { error: event.payload.error } : { result: event.payload.result }
+          ))
+          break
+      }
+    }
+
+    // Add tool call messages to the last assistant message
+    // This is a simplified approach for v1
+    if (toolResultsMap.size > 0) {
+      // Find all tool_call_start events to build proper tool messages
+      const toolCallStarts = events.filter(e => e.type === 'tool_call_start')
+      const lastAssistantIdx = findLastIndex(messages, m => m.role === 'assistant')
+
+      if (lastAssistantIdx >= 0) {
+        const toolCalls: ToolCall[] = toolCallStarts.map(e => ({
+          id: e.payload.toolCallId,
+          type: 'function' as const,
+          function: {
+            name: e.payload.toolName,
+            arguments: JSON.stringify(e.payload.args),
+          },
+        }))
+
+        if (toolCalls.length > 0) {
+          messages[lastAssistantIdx] = {
+            ...messages[lastAssistantIdx],
+            tool_calls: toolCalls,
+          }
+
+          // Add tool result messages after the assistant message
+          const insertIdx = lastAssistantIdx + 1
+          for (const tc of toolCalls) {
+            const result = toolResultsMap.get(tc.id)
+            if (result) {
+              messages.splice(insertIdx, 0, {
+                role: 'tool',
+                tool_call_id: tc.id,
+                content: result,
+              })
+            }
+          }
+        }
+      }
+    }
+
+    return messages
+  }
+
+  private async executeTools(toolCalls: ToolCall[]): Promise<Array<{ toolCallId: string; toolName: string; result?: unknown; error?: string }>> {
+    // Separate read-only and write tools
+    const readOnly: ToolCall[] = []
+    const write: ToolCall[] = []
+
+    for (const tc of toolCalls) {
+      const tool = this.tools.get(tc.function.name)
+      if (tool?.isReadOnly) {
+        readOnly.push(tc)
+      } else {
+        write.push(tc)
+      }
+    }
+
+    const results: Array<{ toolCallId: string; toolName: string; result?: unknown; error?: string }> = []
+    const ctx: ToolContext = {
+      sessionId: this.sessionId,
+      workspaceRoot: this.workspaceRoot,
+      githubToken: this.githubToken,
+      resolvePath: (inputPath: string) => {
+        const resolved = path.resolve(this.workspaceRoot, inputPath)
+        if (!resolved.startsWith(this.workspaceRoot)) {
+          throw new Error(`Path escapes workspace: ${inputPath}`)
+        }
+        return resolved
+      },
+    }
+
+    // Execute read-only tools in parallel
+    if (readOnly.length > 0) {
+      const parallelResults = await Promise.allSettled(
+        readOnly.map(tc => this.executeOneTool(tc, ctx))
+      )
+      for (let i = 0; i < readOnly.length; i++) {
+        const tc = readOnly[i]
+        const res = parallelResults[i]
+        this.emit({
+          type: 'tool_call_start',
+          payload: {
+            toolCallId: tc.id,
+            toolName: tc.function.name,
+            args: safeParseJSON(tc.function.arguments),
+          },
+        })
+        if (res.status === 'fulfilled') {
+          results.push(res.value)
+        } else {
+          results.push({
+            toolCallId: tc.id,
+            toolName: tc.function.name,
+            error: res.reason instanceof Error ? res.reason.message : String(res.reason),
+          })
+        }
+      }
+    }
+
+    // Execute write tools sequentially
+    for (const tc of write) {
+      this.emit({
+        type: 'tool_call_start',
+        payload: {
+          toolCallId: tc.id,
+          toolName: tc.function.name,
+          args: safeParseJSON(tc.function.arguments),
+        },
+      })
+      try {
+        const result = await this.executeOneTool(tc, ctx)
+        results.push(result)
+      } catch (error) {
+        results.push({
+          toolCallId: tc.id,
+          toolName: tc.function.name,
+          error: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
+
+    return results
+  }
+
+  private async executeOneTool(
+    tc: ToolCall,
+    ctx: ToolContext,
+  ): Promise<{ toolCallId: string; toolName: string; result?: unknown; error?: string }> {
+    const tool = this.tools.get(tc.function.name)
+    if (!tool) {
+      return {
+        toolCallId: tc.id,
+        toolName: tc.function.name,
+        error: `Unknown tool: ${tc.function.name}`,
+      }
+    }
+
+    let args: Record<string, unknown>
+    try {
+      args = JSON.parse(tc.function.arguments)
+    } catch {
+      return {
+        toolCallId: tc.id,
+        toolName: tc.function.name,
+        error: `Invalid JSON arguments: ${tc.function.arguments}`,
+      }
+    }
+
+    // Validate args against schema
+    const validation = tool.inputSchema.safeParse(args)
+    if (!validation.success) {
+      return {
+        toolCallId: tc.id,
+        toolName: tc.function.name,
+        error: `Invalid arguments: ${validation.error.message}`,
+      }
+    }
+
+    try {
+      // Run the tool's async generator and collect result
+      const gen = tool.call(validation.data, ctx)
+      let lastResult = await gen.next()
+      while (!lastResult.done) {
+        const progress = lastResult.value as Progress
+        if (progress.type === 'progress') {
+          this.emit({
+            type: 'tool_call_progress',
+            payload: {
+              toolCallId: tc.id,
+              toolName: tc.function.name,
+              message: progress.message,
+            },
+          })
+        }
+        lastResult = await gen.next()
+      }
+      const value = lastResult.value
+      return {
+        toolCallId: tc.id,
+        toolName: tc.function.name,
+        result: value,
+      }
+    } catch (error) {
+      return {
+        toolCallId: tc.id,
+        toolName: tc.function.name,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
+  private emit(event: Omit<Event, 'seq' | 'ts'>): void {
+    const fullEvent = {
+      ...event,
+      seq: this.seq++,
+      ts: Date.now(),
+    } as Event
+
+    // Append to event log with fsync
+    this.eventLog.append(this.sessionId, fullEvent)
+
+    // Notify listener
+    this.onEvent?.(fullEvent)
+  }
+}
+
+function safeParseJSON(str: string): Record<string, unknown> {
+  try {
+    return JSON.parse(str)
+  } catch {
+    return {}
+  }
+}
+
+function findLastIndex<T>(arr: T[], predicate: (item: T) => boolean): number {
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (predicate(arr[i])) return i
+  }
+  return -1
+}

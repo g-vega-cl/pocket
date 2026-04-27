@@ -1,95 +1,123 @@
 # Pocket
 
-Self-hosted autonomous coding agent. Chat with an AI to work on GitHub repos.
+A self-hosted coding agent you drive from your phone. The server runs on your home machine and exposes a tunneled web client. The agent works on your repos, opens PRs, and keeps going while your phone is locked.
 
-## Branch Information
+## Architecture
 
-**Default Branch:** `pocket/1777250692-defaultrepo`
+```
+pocket/
+├── apps/
+│   ├── web/          ← TanStack Start frontend (EventSource + SSE)
+│   └── server/       ← Fastify API + agent runtime
+├── packages/
+│   ├── core/         ← Shared types (Event, Tool, Message, Session, etc.)
+│   ├── llm/          ← OpenRouter provider with stream normalization
+│   ├── tools/        ← 20 tool implementations (file, git, bash, web, background)
+│   └── agent/        ← AgentRunner, SessionManager, EventLog, PermissionGate,
+│                       ProcessManager, TokenCounter
+└── docs/
+```
 
-This repository uses `pocket/1777250692-defaultrepo` as the default branch. To make this the default branch in GitHub:
+**Single process, single port.** The server serves both the API and the web client. SSE for server→client, REST for client→server. No WebSockets, no polling.
 
-1. Go to your repository on GitHub
-2. Click on **Settings**
-3. In the left sidebar, click **Branches**
-4. Under **Default branch**, click **Change default branch**
-5. Select `pocket/1777250692-defaultrepo` from the dropdown
-6. Click **Update**
+### Key principles
+
+- **The server is the source of truth.** Closing the tab never stops the agent.
+- **Append-only event log.** Sessions are JSONL on disk. Reconnection is replay, not reconnect.
+- **Permissions over prompts.** Sensible auto-allow defaults so the agent keeps going.
+- **One transport, one protocol.** SSE + REST only.
 
 ## Install
 
 ```bash
 pnpm install
 cp .env.example .env
-# Edit .env with OPENROUTER_API_KEY and GITHUB_TOKEN
+# Edit .env: set OPENROUTER_API_KEY and GITHUB_TOKEN
 ```
 
 ## Run
 
 ```bash
-pnpm dev        # Both server + frontend
-# Or:
-pnpm server     # Backend on :5173
-pnpm web:dev    # Frontend on :3000
+pnpm dev                  # Server + web (concurrently)
+# Or individually:
+pnpm server:dev           # Server on :5173 (Fastify)
+pnpm web:dev              # Frontend on :3000 (Vite)
 ```
 
-Access: http://localhost:3000/pocket
+Access: `http://localhost:3000`
 
-### Persistence
-Pocket sessions are persistent. If you close your browser or refresh the page, the agent continues working in the background. You can resume any session from the "Session History" list or by using its unique URL.
+### Cloudflare Tunnel
 
-### Deployment with Cloudflare Tunnel
-
-If using a Cloudflare Tunnel (e.g., `bolt.clvg.uk`):
-1. Point your tunnel's public hostname to `http://localhost:3000`.
-2. The frontend Vite server is configured to proxy `/ws` to port `5173` for the backend.
-3. Ensure `apps/web/vite.config.ts` includes your domain in `allowedHosts` and `hmr.host`.
-
-## Use
-
-1. Paste GitHub repo URL
-2. Enter task description
-3. (Optional) Provide a GitHub Token override if your global token is expired or you need different permissions
-4. Clone → Create Branch
-5. Chat with agent
-6. PR created to `pocket` branch
-
-### Architecture
-
-Pocket uses a **polling-based** architecture for real-time updates:
-- Client polls server every 5 seconds for session updates
-- No WebSocket or SSE - simpler and more reliable for background tasks
-- Session state is persisted to disk and survives server restarts
-
-### Debugging
-
-Enable debug logging to see LLM interactions:
-- Server logs show `[LLM] Delta:` and `[LLM] Complete:` messages
-- These appear in the server console and are sent to the client as `type: 'debug'` messages
-- Use debug logs to diagnose issues with LLM responses or tool calls
-- Malformed JSON in tool arguments is automatically logged to `server/logs/` for debugging
-
-See [LLM Debugging Guide](docs/LLM-DEBUGGING.md) for detailed troubleshooting, including:
-- Handling malformed JSON in tool arguments
-- Retry logic for failed tool calls
-- Viewing and analyzing error logs
+Point your tunnel to `http://localhost:3000`. SSE heartbeats every 15s keep the tunnel alive. Vite proxies `/api` requests to the server on `:5173`.
 
 ## Test
 
 ```bash
-cd server && pnpm test          # Server (75 tests)
-cd apps/web && pnpm test        # Web (8 tests)
+pnpm -r test              # All 167 tests across 6 packages
+# or individually:
+pnpm --filter @pocket/agent test      # 75 tests
+pnpm --filter @pocket/tools test      # 52 tests
+pnpm --filter web test                # 12 tests
+pnpm --filter @pocket/server test     #  8 tests
+pnpm --filter @pocket/core test       #  9 tests
+pnpm --filter @pocket/llm test        # 11 tests
 ```
+
+## Use
+
+1. Open the app, paste a GitHub repo URL and task description
+2. The agent clones the repo, creates a branch (`pocket/{timestamp}-{slug}`), and starts working
+3. Chat with the agent — it reads files, makes changes, commits, and pushes
+4. Use "Create PR" when ready
+5. Reopen the tab any time — session history is preserved
+
+### Session persistence
+
+Sessions live in `~/.pocket/sessions/{id}/`:
+
+- `meta.json` — repo, task, model, branch, status, timestamps
+- `events.jsonl` — append-only event log (the source of truth)
+- `permissions.json` — session-scoped permission grants
+
+Workspaces live in `~/.pocket/workspaces/{id}/`. Workspaces for `done`/`archived` sessions are auto-cleaned after 30 days. Session metadata is never deleted.
+
+### Permissions
+
+Read-only tools auto-allow. Writes inside the workspace auto-allow. Bash is gate by regex matchers in `~/.pocket/config.json`. Unknown commands require approval. The deny list (`rm -rf /`, `sudo`) cannot be overridden.
+
+### Crash recovery
+
+On restart, sessions that were `working` are marked `interrupted`. The client shows a "Resume" button. The agent never auto-resumes — you decide.
 
 ## Docs
 
 | Document | Description |
 |----------|-------------|
-| [Overview](docs/Overview.md) | Quick reference |
-| [Architecture](docs/Architecture.md) | Technical details |
-| [Tunnel Setup](docs/Tunnel.md) | Remote access |
+| [Architecture](docs/Architecture.md) | Full technical design |
+| [User Stories](docs/UserStories.md) | User flows |
 
+## Tool inventory (v1)
 
-### ROADMAP
-- [ ] check if it can do web search
-- [ ] add connection status in the main page too? How is it checked to begin with?
-- [ ] use image recognition as well, inspect visual changes just like Jules. Run tests and build too if there are any in the repo
+| Tool | Read-only | Default | Notes |
+|------|-----------|---------|-------|
+| `read_file` | ✓ | allow | Path bound to workspace |
+| `list_files` | ✓ | allow | Extension filter |
+| `grep` | ✓ | allow | ripgrep fallback |
+| `glob` | ✓ | allow | File pattern matching |
+| `web_fetch` | ✓ | allow | Capped at 100KB |
+| `web_search` | ✓ | allow | OpenRouter-powered |
+| `git_status` / `git_log` / `git_diff` | ✓ | allow | Read-only git |
+| `write_file` | ✗ | conditional | Allow in workspace, ask outside |
+| `edit_file` | ✗ | conditional | String-replace, enforces uniqueness |
+| `git_create_branch` | ✗ | allow | `pocket/{timestamp}-{slug}` |
+| `git_commit` | ✗ | allow | Stages all changes |
+| `git_push` | ✗ | conditional | Protected branch check |
+| `github_create_pr` | ✗ | allow | PR to `pocket` base branch |
+| `bash` | ✗ | rule-matched | Regex gate, 5-min timeout |
+| `bash_background` | ✗ | rule-matched | Spawn daemon process |
+| `bash_read_output` | ✓ | allow | since_last_read / tail / all |
+| `bash_send_input` | ✗ | ask | Write to process stdin |
+| `bash_kill` | ✗ | allow | SIGTERM → SIGKILL |
+| `list_processes` | ✓ | allow | List background processes |
+| `plan` | ✗ | allow | Agent scratchpad |
+| `todos_write` | ✗ | allow | Task tracking |
