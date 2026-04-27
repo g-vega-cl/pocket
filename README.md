@@ -2,6 +2,19 @@
 
 Self-hosted autonomous coding agent. Chat with an AI to work on GitHub repos.
 
+## Branch Information
+
+**Default Branch:** `pocket/1777250692-defaultrepo`
+
+This repository uses `pocket/1777250692-defaultrepo` as the default branch. To make this the default branch in GitHub:
+
+1. Go to your repository on GitHub
+2. Click on **Settings**
+3. In the left sidebar, click **Branches**
+4. Under **Default branch**, click **Change default branch**
+5. Select `pocket/1777250692-defaultrepo` from the dropdown
+6. Click **Update**
+
 ## Install
 
 ```bash
