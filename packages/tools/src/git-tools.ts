@@ -31,6 +31,7 @@ export async function cloneRepo(
   repoUrl: string,
   sessionId: string,
   token?: string,
+  onProgress?: (message: string) => void,
 ): Promise<string> {
   const workspaceDir = path.join(getWorkspaceDir(), sessionId)
   fs.mkdirSync(workspaceDir, { recursive: true })
@@ -46,9 +47,25 @@ export async function cloneRepo(
     authenticatedUrl = repoUrl.replace('https://github.com', `https://${token}@github.com`)
   }
 
+  onProgress?.('Starting clone...')
+
   return new Promise((resolve, reject) => {
-    const git = spawn('git', ['clone', authenticatedUrl, repoPath], {
-      stdio: 'pipe',
+    const git = spawn('git', ['clone', '--progress', authenticatedUrl, repoPath], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    })
+
+    let stderrBuffer = ''
+
+    git.stderr?.on('data', (data: Buffer) => {
+      const chunk = data.toString()
+      stderrBuffer += chunk
+      // Git sends progress to stderr; surface the last meaningful line
+      const lines = chunk.split('\n').filter(l => l.trim())
+      for (const line of lines) {
+        if (line.includes('Receiving objects') || line.includes('Resolving deltas') || line.includes('Checking out')) {
+          onProgress?.(line.trim())
+        }
+      }
     })
 
     const timeout = setTimeout(() => {
@@ -58,8 +75,12 @@ export async function cloneRepo(
 
     git.on('close', (code) => {
       clearTimeout(timeout)
-      if (code === 0) resolve(repoPath)
-      else reject(new Error(`git clone exited with code ${code}`))
+      if (code === 0) {
+        onProgress?.('Clone complete')
+        resolve(repoPath)
+      } else {
+        reject(new Error(`git clone exited with code ${code}. stderr: ${stderrBuffer.slice(-500)}`))
+      }
     })
 
     git.on('error', (err) => {
@@ -69,7 +90,12 @@ export async function cloneRepo(
   })
 }
 
-export async function initLocalRepo(sessionId: string): Promise<string> {
+export async function initLocalRepo(
+  sessionId: string,
+  onProgress?: (message: string) => void,
+): Promise<string> {
+  onProgress?.('Initializing local repo...')
+
   const workspaceDir = path.join(getWorkspaceDir(), sessionId)
   fs.mkdirSync(workspaceDir, { recursive: true })
 
@@ -83,6 +109,7 @@ export async function initLocalRepo(sessionId: string): Promise<string> {
   execSync(`git config user.email "pocket-agent@local"`, { cwd: repoPath, stdio: 'pipe' })
   execSync(`git config user.name "Pocket Agent"`, { cwd: repoPath, stdio: 'pipe' })
 
+  onProgress?.('Local repo ready')
   return repoPath
 }
 

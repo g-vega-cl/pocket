@@ -66,7 +66,7 @@ pnpm --filter @pocket/llm test        # 11 tests
 ## Use
 
 1. Open the app, paste a GitHub repo URL and task description
-2. The agent clones the repo, creates a branch (`pocket/{timestamp}-{slug}`), and starts working
+2. On your first message, the agent clones the repo into `~/.pocket/workspaces/{id}/repo`, creates a branch (`pocket/{timestamp}-{slug}`), and starts working
 3. Chat with the agent — it reads files, makes changes, commits, and pushes
 4. Use "Create PR" when ready
 5. Reopen the tab any time — session history is preserved

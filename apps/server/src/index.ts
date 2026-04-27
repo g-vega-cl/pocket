@@ -20,6 +20,8 @@ import {
   githubCreatePRTool,
   createBackgroundTools,
   getWorkspaceDir,
+  cloneRepo,
+  initLocalRepo,
 } from '@pocket/tools'
 import type { Event } from '@pocket/core'
 
@@ -193,6 +195,100 @@ export async function buildApp(options: BuildOptions) {
       return reply.status(400).send({ error: 'content is required' })
     }
 
+    // ─── Workspace setup (first turn only) ────────────────────
+    let workspaceRoot = session.localPath
+    if (!workspaceRoot) {
+      const setupToolCallId = `workspace-setup-${Date.now()}`
+      const setupToolName = session.isLocal ? 'init_local_repo' : 'clone_repo'
+
+      // Emit tool_call_start
+      const startEvent: Event = {
+        seq: session.nextSeq++,
+        ts: Date.now(),
+        type: 'tool_call_start',
+        payload: {
+          toolCallId: setupToolCallId,
+          toolName: setupToolName,
+          args: { repoUrl: session.repoUrl, sessionId: id, isLocal: session.isLocal },
+        },
+      }
+      eventLog.append(id, startEvent)
+      emitToSession(id, startEvent)
+
+      // Emit status: cloning
+      const statusEvent: Event = {
+        seq: session.nextSeq++,
+        ts: Date.now(),
+        type: 'status',
+        payload: { status: 'cloning', message: 'Setting up workspace...' },
+      }
+      eventLog.append(id, statusEvent)
+      emitToSession(id, statusEvent)
+
+      try {
+        if (session.isLocal) {
+          workspaceRoot = await initLocalRepo(id, (message) => {
+            const progressEvent: Event = {
+              seq: session.nextSeq++,
+              ts: Date.now(),
+              type: 'tool_call_progress',
+              payload: {
+                toolCallId: setupToolCallId,
+                toolName: setupToolName,
+                message,
+              },
+            }
+            eventLog.append(id, progressEvent)
+            emitToSession(id, progressEvent)
+          })
+        } else {
+          workspaceRoot = await cloneRepo(session.repoUrl, id, session.githubToken, (message) => {
+            const progressEvent: Event = {
+              seq: session.nextSeq++,
+              ts: Date.now(),
+              type: 'tool_call_progress',
+              payload: {
+                toolCallId: setupToolCallId,
+                toolName: setupToolName,
+                message,
+              },
+            }
+            eventLog.append(id, progressEvent)
+            emitToSession(id, progressEvent)
+          })
+        }
+
+        // Persist localPath and advance nextSeq
+        sessionManager.updateSession(id, {
+          localPath: workspaceRoot,
+          status: 'ready',
+          nextSeq: session.nextSeq,
+        })
+
+        // Emit status: ready
+        const readyEvent: Event = {
+          seq: session.nextSeq++,
+          ts: Date.now(),
+          type: 'status',
+          payload: { status: 'ready', message: 'Workspace ready' },
+        }
+        eventLog.append(id, readyEvent)
+        emitToSession(id, readyEvent)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        const errorEvent: Event = {
+          seq: session.nextSeq++,
+          ts: Date.now(),
+          type: 'status',
+          payload: { status: 'error', message: `Workspace setup failed: ${message}` },
+        }
+        eventLog.append(id, errorEvent)
+        emitToSession(id, errorEvent)
+        sessionManager.updateSession(id, { status: 'error', nextSeq: session.nextSeq })
+        return reply.status(500).send({ error: `Workspace setup failed: ${message}` })
+      }
+    }
+
     // Create the LLM provider
     const apiKey = options.env?.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY
     if (!apiKey) {
@@ -241,7 +337,7 @@ Use tools to explore and make changes as needed.`
       model: session.model,
       systemPrompt,
       startingSeq: session.nextSeq,
-      workspaceRoot: session.localPath ?? '',
+      workspaceRoot,
       githubToken: session.githubToken,
       onEvent: (event) => {
         emitToSession(id, event)
