@@ -117,4 +117,23 @@ describe('Server API', () => {
     })
     expect(res.statusCode).toBe(400)
   })
+
+  it('should fallback to GITHUB_TOKEN env var when githubToken is not provided', async () => {
+    const envApp = await buildApp({
+      sessionsDir: tmpDir,
+      env: { GITHUB_TOKEN: 'ghp_env_fallback123' },
+    })
+    await envApp.ready()
+
+    const res = await envApp.inject({
+      method: 'POST',
+      url: '/api/sessions',
+      payload: { repoUrl: 'https://github.com/user/repo', task: 'fix bug', model: 'openai/gpt-4o' },
+    })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.payload)
+    expect(body.id).toBeTruthy()
+
+    await envApp.close()
+  })
 })

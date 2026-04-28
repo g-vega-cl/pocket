@@ -209,11 +209,12 @@ export const gitPushTool: Tool<GitPushInput, { success: boolean; branch?: string
     }
 
     // Set up remote with token if available
-    if (ctx.githubToken) {
+    const token = ctx.githubToken || process.env.GITHUB_TOKEN
+    if (token) {
       try {
         const remoteUrl = execSync(`git -C "${cwd.replace(/"/g, '\\"')}" remote get-url origin`, { encoding: 'utf-8' }).trim()
-        if (remoteUrl.includes('github.com') && !remoteUrl.includes(`://${ctx.githubToken}@`)) {
-          const authenticatedUrl = remoteUrl.replace('https://github.com', `https://${ctx.githubToken}@github.com`)
+        if (remoteUrl.includes('github.com') && !remoteUrl.includes(`://${token}@`)) {
+          const authenticatedUrl = remoteUrl.replace('https://github.com', `https://${token}@github.com`)
           execSync(`git -C "${cwd.replace(/"/g, '\\"')}" remote set-url origin ${authenticatedUrl}`, { stdio: 'pipe' })
         }
       } catch {

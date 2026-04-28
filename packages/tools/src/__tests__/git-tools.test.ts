@@ -122,6 +122,33 @@ describe('gitPushTool', () => {
     expect(result.value.branch).toBe('feature/test-branch')
   })
 
+  it('should fallback to process.env.GITHUB_TOKEN when ctx.githubToken is missing', async () => {
+    const originalToken = process.env.GITHUB_TOKEN
+    process.env.GITHUB_TOKEN = 'ghp_fallback_token_xyz'
+
+    // Set remote to a GitHub-style URL so token injection triggers
+    execSync('git remote set-url origin https://github.com/test-user/test-repo.git', { cwd: repoPath, stdio: 'pipe' })
+
+    const { gitPushTool } = await import('../git-tools.js')
+    const ctx = { sessionId: 'test-sess', workspaceRoot: repoPath, resolvePath: (p: string) => path.resolve(repoPath, p) }
+    const gen = gitPushTool.call({}, ctx)
+    let result = await gen.next()
+    let error: Error | null = null
+    try {
+      while (!result.done) {
+        result = await gen.next()
+      }
+    } catch (err) {
+      error = err as Error
+    }
+
+    // Push will fail because github.com isn't reachable, but the remote should have been updated first
+    const remoteUrl = execSync('git remote get-url origin', { cwd: repoPath, encoding: 'utf-8' }).trim()
+    expect(remoteUrl).toContain('ghp_fallback_token_xyz@github.com')
+
+    process.env.GITHUB_TOKEN = originalToken
+  })
+
   it('should reject when push fails (e.g., non-fast-forward)', async () => {
     // First push from original repo so remote has the branch
     const { gitPushTool } = await import('../git-tools.js')

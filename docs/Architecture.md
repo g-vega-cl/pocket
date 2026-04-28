@@ -631,6 +631,8 @@ The previous 7-day default was wrong for the "phone died, reopened a week later"
 ### GitHub auth (unchanged from your current design, just specified properly)
 
 - Server reads `GITHUB_TOKEN` from `.env` as default
+- On session creation, if the client does not provide a token, the server falls back to `process.env.GITHUB_TOKEN`
+- `git_push` falls back to `process.env.GITHUB_TOKEN` if the session has no token stored
 - User can override per-session in the new-session form
 - Token is **never** logged and never sent to the client after creation
 - Git operations inject the token into the HTTPS URL (your existing pattern)

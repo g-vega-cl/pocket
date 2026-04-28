@@ -111,7 +111,7 @@ export async function buildApp(options: BuildOptions) {
       repoUrl: body.repoUrl,
       task: body.task,
       model: body.model,
-      githubToken: body.githubToken,
+        githubToken: body.githubToken || (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN),
       isLocal: body.isLocal ?? false,
     })
 
