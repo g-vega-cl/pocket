@@ -15,6 +15,7 @@ const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
   'deepseek/deepseek-chat': { contextWindow: 128000, supportsTools: true, supportsReasoning: true },
   'deepseek/deepseek-chat-v3-0324': { contextWindow: 128000, supportsTools: true, supportsReasoning: true },
   'xiaomi/mimo-v2-flash': { contextWindow: 128000, supportsTools: true, supportsReasoning: false },
+  'deepseek/deepseek-v4-flash': { contextWindow: 128000, supportsTools: true, supportsReasoning: true },
 }
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1'

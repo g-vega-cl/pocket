@@ -539,4 +539,74 @@ describe('AgentRunner', () => {
       expect(toolResultEvents[0].payload.error).toBe('Permission denied by user')
     })
   })
+
+  it('should reconstruct multi-turn tool call history correctly', async () => {
+    registry.register(makeDummyTool('read_tool', true, 'file content'))
+    registry.register(makeDummyTool('write_tool', false, 'success'))
+
+    const provider = makeMockProvider()
+    let callCount = 0
+    const capturedMessages: any[][] = []
+
+    provider.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+      callCount++
+      capturedMessages.push(provider.streamChat.mock.calls[callCount - 1][0].messages)
+
+      if (callCount === 1) {
+        yield { type: 'tool_call', toolCall: { id: 'call_1', name: 'read_tool', arguments: '{"input":"a"}' } }
+        yield { type: 'tool_call', toolCall: { id: 'call_2', name: 'write_tool', arguments: '{"input":"b"}' } }
+        return { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+      }
+      if (callCount === 2) {
+        yield { type: 'tool_call', toolCall: { id: 'call_3', name: 'read_tool', arguments: '{"input":"c"}' } }
+        return { promptTokens: 20, completionTokens: 5, totalTokens: 25 }
+      }
+      yield { type: 'text', text: 'Done' }
+      return { promptTokens: 30, completionTokens: 2, totalTokens: 32 }
+    })
+
+    const runner = new AgentRunner({
+      sessionId: 'sess_test',
+      provider: provider as any,
+      eventLog,
+      tools: registry,
+      model: 'openai/gpt-4o',
+      onEvent: (event) => capturedEvents.push(event),
+      systemPrompt: 'You are a helper.',
+    })
+
+    await runner.runTurn({ role: 'user', content: 'Do work' })
+
+    expect(callCount).toBe(3)
+
+    // Call 1: system + user
+    expect(capturedMessages[0]).toHaveLength(2)
+    expect(capturedMessages[0][1].role).toBe('user')
+
+    // Call 2: system + user + assistant(2 tools) + tool + tool
+    const msg2 = capturedMessages[1]
+    expect(msg2).toHaveLength(5)
+    expect(msg2[1].role).toBe('user')
+    expect(msg2[2].role).toBe('assistant')
+    expect(msg2[2].tool_calls).toHaveLength(2)
+    expect(msg2[2].tool_calls![0].function.name).toBe('read_tool')
+    expect(msg2[2].tool_calls![1].function.name).toBe('write_tool')
+    expect(msg2[3].role).toBe('tool')
+    expect(msg2[3].tool_call_id).toBe('call_1')
+    expect(msg2[4].role).toBe('tool')
+    expect(msg2[4].tool_call_id).toBe('call_2')
+
+    // Call 3: system + user + assistant(2 tools) + tool + tool + assistant(1 tool) + tool
+    const msg3 = capturedMessages[2]
+    expect(msg3).toHaveLength(7)
+    expect(msg3[2].role).toBe('assistant')
+    expect(msg3[2].tool_calls).toHaveLength(2)
+    expect(msg3[3].role).toBe('tool')
+    expect(msg3[4].role).toBe('tool')
+    expect(msg3[5].role).toBe('assistant')
+    expect(msg3[5].tool_calls).toHaveLength(1)
+    expect(msg3[5].tool_calls![0].function.name).toBe('read_tool')
+    expect(msg3[6].role).toBe('tool')
+    expect(msg3[6].tool_call_id).toBe('call_3')
+  })
 })

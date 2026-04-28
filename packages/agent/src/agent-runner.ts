@@ -36,6 +36,8 @@ export class AgentRunner {
   private githubToken?: string
   private permissionGate?: PermissionGate
   private onPermissionAlwaysAllow?: (toolName: string) => void
+  private recentToolCallKeys: string[] = []
+  private readonly MAX_REPEAT_CALLS = 3
   private pendingPermissions = new Map<string, {
     resolve: (allowed: boolean) => void
     toolName: string
@@ -56,6 +58,7 @@ export class AgentRunner {
     this.githubToken = options.githubToken
     this.permissionGate = options.permissionGate
     this.onPermissionAlwaysAllow = options.onPermissionAlwaysAllow
+    this.recentToolCallKeys = []
   }
 
   abort(): void {
@@ -97,6 +100,9 @@ export class AgentRunner {
   }
 
   async runTurn(userMessage: { role: 'user'; content: string }): Promise<void> {
+    // Reset loop-detection state for each new user turn
+    this.recentToolCallKeys = []
+
     // Emit user message event
     this.emit({
       type: 'user_message',
@@ -224,7 +230,7 @@ export class AgentRunner {
     }
   }
 
-  private buildMessages(userMessage: { role: 'user'; content: string }): Message[] {
+  private buildMessages(_userMessage: { role: 'user'; content: string }): Message[] {
     const messages: Message[] = []
 
     // System prompt
@@ -237,7 +243,21 @@ export class AgentRunner {
 
     // Replay events to reconstruct conversation history
     const events = this.eventLog.replaySync(this.sessionId)
-    const toolResultsMap = new Map<string, string>()
+
+    // Group events by assistant response. Each assistant_text_done starts a new group
+    // that may be followed by tool_call_start + tool_call_result pairs.
+    type AssistantGroup = {
+      text: string | null
+      toolCalls: Array<{
+        id: string
+        name: string
+        args: Record<string, unknown>
+      }>
+      toolResults: Map<string, { result?: unknown; error?: string }>
+    }
+
+    const groups: AssistantGroup[] = []
+    let currentGroup: AssistantGroup | null = null
 
     for (const event of events) {
       switch (event.type) {
@@ -248,68 +268,72 @@ export class AgentRunner {
           })
           break
 
-        case 'assistant_text_done': {
-          // Find the tool calls between this and the previous user message
-          // For now, just add the assistant message
-          const assistantMsg: Message = {
-            role: 'assistant',
-            content: event.payload.text || null,
+        case 'assistant_text_done':
+          if (currentGroup) {
+            groups.push(currentGroup)
           }
-
-          // Look for tool calls that happened around this turn
-          // We'll match tool_call_result events to add tool messages
-          messages.push(assistantMsg)
+          currentGroup = {
+            text: event.payload.text || null,
+            toolCalls: [],
+            toolResults: new Map(),
+          }
           break
-        }
 
         case 'tool_call_start':
-          // We handle tool calls via the assistant text done + tool_call_result pattern
+          if (currentGroup) {
+            currentGroup.toolCalls.push({
+              id: event.payload.toolCallId,
+              name: event.payload.toolName,
+              args: event.payload.args,
+            })
+          }
           break
 
         case 'tool_call_result':
-          // Store tool results to add after the corresponding assistant message
-          toolResultsMap.set(event.payload.toolCallId, JSON.stringify(
-            event.payload.error ? { error: event.payload.error } : { result: event.payload.result }
-          ))
+          if (currentGroup) {
+            currentGroup.toolResults.set(event.payload.toolCallId, {
+              result: event.payload.result,
+              error: event.payload.error,
+            })
+          }
           break
       }
     }
 
-    // Add tool call messages to the last assistant message
-    // This is a simplified approach for v1
-    if (toolResultsMap.size > 0) {
-      // Find all tool_call_start events to build proper tool messages
-      const toolCallStarts = events.filter(e => e.type === 'tool_call_start')
-      const lastAssistantIdx = findLastIndex(messages, m => m.role === 'assistant')
+    if (currentGroup) {
+      groups.push(currentGroup)
+    }
 
-      if (lastAssistantIdx >= 0) {
-        const toolCalls: ToolCall[] = toolCallStarts.map(e => ({
-          id: e.payload.toolCallId,
+    // Convert groups to assistant + tool messages
+    for (const group of groups) {
+      const assistantMsg: Message = {
+        role: 'assistant',
+        content: group.text,
+      }
+
+      if (group.toolCalls.length > 0) {
+        assistantMsg.tool_calls = group.toolCalls.map(tc => ({
+          id: tc.id,
           type: 'function' as const,
           function: {
-            name: e.payload.toolName,
-            arguments: JSON.stringify(e.payload.args),
+            name: tc.name,
+            arguments: JSON.stringify(tc.args),
           },
         }))
+      }
 
-        if (toolCalls.length > 0) {
-          messages[lastAssistantIdx] = {
-            ...messages[lastAssistantIdx],
-            tool_calls: toolCalls,
-          }
+      messages.push(assistantMsg)
 
-          // Add tool result messages after the assistant message
-          const insertIdx = lastAssistantIdx + 1
-          for (const tc of toolCalls) {
-            const result = toolResultsMap.get(tc.id)
-            if (result) {
-              messages.splice(insertIdx, 0, {
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: result,
-              })
-            }
-          }
+      for (const tc of group.toolCalls) {
+        const result = group.toolResults.get(tc.id)
+        if (result) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: JSON.stringify(
+              result.error ? { error: result.error } : { result: result.result }
+            ),
+          })
         }
       }
     }
@@ -500,6 +524,22 @@ export class AgentRunner {
             toolName: tc.function.name,
             error: 'Permission denied by user',
           }
+        }
+      }
+    }
+
+    // Detect repeated identical write tool calls to break loops
+    if (!tool.isReadOnly) {
+      const key = `${tc.function.name}:${tc.function.arguments}`
+      this.recentToolCallKeys.push(key)
+      if (this.recentToolCallKeys.length > 10) this.recentToolCallKeys.shift()
+
+      const lastN = this.recentToolCallKeys.slice(-this.MAX_REPEAT_CALLS)
+      if (lastN.length === this.MAX_REPEAT_CALLS && new Set(lastN).size === 1) {
+        return {
+          toolCallId: tc.id,
+          toolName: tc.function.name,
+          error: `Blocked: repeated ${this.MAX_REPEAT_CALLS} identical write tool calls. The model may be stuck in a loop.`,
         }
       }
     }

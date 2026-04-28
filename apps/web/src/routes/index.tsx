@@ -12,7 +12,7 @@ function HomePage() {
   const [sessions, setSessions] = useState<SessionListItem[]>([])
   const [repoUrl, setRepoUrl] = useState('')
   const [task, setTask] = useState('')
-  const [model, setModel] = useState('xiaomi/mimo-v2-flash')
+  const [model, setModel] = useState('deepseek/deepseek-v4-flash')
   const [githubToken, setGithubToken] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

@@ -164,6 +164,10 @@ async function* runTurn(session: Session, userMessage: Message) {
 - Hard cap on turns per user message (e.g. 50). Prevents runaway loops.
 - Hard cap on tokens per session (your chosen pre-compaction strategy — see §8).
 - AbortController on every session — user can stop the agent at any time.
+- **Duplicate write tool call detection.** If the model issues the same write tool with identical arguments 3 times in a single turn, the executor blocks it with an error. This breaks edit-loop stalls where a weaker model keeps retrying the same failing `edit_file` call because its conversation history is corrupted.
+
+**Message reconstruction:**
+The event log is replayed to build the LLM's conversation history on every turn. Tool calls and their results are grouped per-assistant-response, not lumped together. This ensures multi-turn sessions maintain correct context — the model sees which tools it called in each iteration and what they returned.
 
 ---
 
@@ -545,6 +549,12 @@ OpenRouter routes to many providers, each with quirks. Normalize them at the edg
 
 This logic lives in `OpenRouterProvider`, not in the agent loop. The loop only sees normalized `LLMChunk`s.
 
+### Model defaults and capabilities
+
+The web UI defaults to `deepseek/deepseek-v4-flash` (128K context, tools, reasoning). Capabilities are looked up by exact match then prefix match — this lets model variants like `openai/gpt-4o:2024-08-06` inherit the base model's config. Unknown models fall back to a safe default (128K context, tools enabled, no reasoning).
+
+The provider is the single point of model-specific knowledge. The agent loop only asks `capabilities(model)` and acts on the flags — it never hardcodes model names.
+
 ---
 
 ## 11. Frontend (TanStack Start)
@@ -710,6 +720,8 @@ Each milestone was independently shippable and testable.
 - Crash recovery on server restart (working → interrupted)
 - 30-day workspace cleanup for done/archived sessions
 - SSE heartbeats every 15s
+- Per-turn message reconstruction (tool calls grouped by assistant response, not lumped)
+- Duplicate write tool call detection (blocks identical calls after 3 repeats in one turn)
 
 ---
 
@@ -734,6 +746,7 @@ Resolved during implementation:
 3. **Foreground bash timeout** — 5 minutes. On timeout, the process gets SIGTERM and the tool returns `{ timedOut: true }`.
 4. **HTTP framework** — Fastify (not Express). Chosen for better SSE support and performance.
 5. **Monorepo tool** — pnpm workspaces (not Nx). Simpler, fewer dependencies, already working.
+6. **Message reconstruction from event log** — `buildMessages()` groups tool calls per `assistant_text_done` boundary so multi-turn sessions maintain correct LLM context. Earlier v1 lumped all tool calls onto the last assistant message, which corrupted history and caused loop stalls on flash models.
 
 Still open:
 - **Web push** — deferred to v1.5 per §6.
