@@ -143,7 +143,7 @@ export function reduceEvents(events: Event[]): ChatState {
         msg.toolCalls.push({
           toolCallId: String(event.payload.toolCallId ?? ''),
           toolName: String(event.payload.toolName ?? ''),
-          args: (event.payload.args as Record<string, unknown>) ?? {},
+          args: (event.payload.args ?? {}) as Record<string, unknown>,
           status: 'running',
         })
         break
@@ -180,7 +180,7 @@ export function reduceEvents(events: Event[]): ChatState {
           permissionId: String(event.payload.permissionId ?? ''),
           toolName: String(event.payload.toolName ?? ''),
           toolCallId: String(event.payload.toolCallId ?? ''),
-          args: (event.payload.args as Record<string, unknown>) ?? {},
+          args: (event.payload.args ?? {}) as Record<string, unknown>,
           reason: String(event.payload.reason ?? ''),
           status: 'pending',
         })
