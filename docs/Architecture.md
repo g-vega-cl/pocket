@@ -204,7 +204,7 @@ The `call` is an async generator so long-running tools (clone, bash) can stream 
 | `git_create_branch` | ✗ | allow | per your trust model |
 | `git_commit` | ✗ | allow | per your trust model |
 | `git_push` | ✗ | allow | per your trust model |
-| `github_create_pr` | ✗ | allow | per your trust model |
+| `github_create_pr` | ✗ | allow | PR to `main` base branch |
 | `bash` | ✗ | **rule-matched** (see §6) | per-command matchers, default ask |
 | `bash_background` | ✗ | **rule-matched** (same matchers as bash) | spawns long-running process, returns immediately |
 | `bash_read_output` | ✓ | allow | read buffered output from a background process |

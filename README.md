@@ -112,7 +112,7 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 | `git_create_branch` | ✗ | allow | `pocket/{timestamp}-{slug}` |
 | `git_commit` | ✗ | allow | Stages all changes |
 | `git_push` | ✗ | conditional | Protected branch check |
-| `github_create_pr` | ✗ | allow | PR to `pocket` base branch |
+| `github_create_pr` | ✗ | allow | PR to `main` base branch |
 | `bash` | ✗ | rule-matched | Regex gate, 5-min timeout |
 | `bash_background` | ✗ | rule-matched | Spawn daemon process |
 | `bash_read_output` | ✓ | allow | since_last_read / tail / all |

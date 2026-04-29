@@ -13,7 +13,7 @@ type GithubCreatePRInput = z.infer<typeof githubCreatePRInput>
 
 export const githubCreatePRTool: Tool<GithubCreatePRInput, { success: boolean; prUrl?: string; prNumber?: number; error?: string }> = {
   name: 'github_create_pr',
-  description: 'Create a GitHub pull request from the current branch to the "pocket" base branch.',
+  description: 'Create a GitHub pull request from the current branch to the "main" base branch.',
   inputSchema: githubCreatePRInput,
   isReadOnly: false,
   defaultPermission: 'allow',
@@ -50,14 +50,14 @@ export const githubCreatePRTool: Tool<GithubCreatePRInput, { success: boolean; p
 
     const octokit = new Octokit({ auth: token })
 
-    // Ensure 'pocket' base branch exists locally
+    // Ensure 'main' base branch exists locally
     try {
-      execSync(`git -C "${cwd}" checkout pocket`, { stdio: 'ignore' })
+      execSync(`git -C "${cwd}" checkout main`, { stdio: 'ignore' })
     } catch {
-      // Create pocket branch from HEAD
+      // Assume main exists on remote — fetch and track it
       try {
-        execSync(`git -C "${cwd}" checkout -b pocket`, { stdio: 'ignore' })
-        execSync(`git -C "${cwd}" push -u origin pocket`, { stdio: 'ignore' })
+        execSync(`git -C "${cwd}" fetch origin main`, { stdio: 'ignore' })
+        execSync(`git -C "${cwd}" checkout -b main origin/main`, { stdio: 'ignore' })
       } catch {
         // Ignore
       }
@@ -70,7 +70,7 @@ export const githubCreatePRTool: Tool<GithubCreatePRInput, { success: boolean; p
         title: input.title,
         body: input.body,
         head: headBranch,
-        base: 'pocket',
+        base: 'main',
       })
 
       return {
