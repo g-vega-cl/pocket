@@ -100,6 +100,52 @@ export async function buildApp(options: BuildOptions) {
     return { status: 'ok', timestamp: Date.now() }
   })
 
+  // List GitHub repos
+  app.get('/api/github/repos', async (request, reply) => {
+    const githubToken = options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN
+    if (!githubToken) {
+      return reply.status(400).send({ error: 'GITHUB_TOKEN not configured' })
+    }
+
+    try {
+      const res = await fetch('https://api.github.com/user/repos?sort=pushed&per_page=100&direction=desc', {
+        headers: {
+          Authorization: `Bearer ${githubToken}`,
+          Accept: 'application/vnd.github.v3+json',
+          'User-Agent': 'pocket',
+        },
+      })
+
+      if (!res.ok) {
+        const body = await res.text()
+        return reply.status(res.status).send({ error: `GitHub API error: ${body}` })
+      }
+
+      const repos = await res.json() as Array<{
+        full_name: string
+        clone_url: string
+        description: string | null
+        pushed_at: string
+        stargazers_count: number
+        language: string | null
+      }>
+
+      return {
+        repos: repos.map(r => ({
+          fullName: r.full_name,
+          cloneUrl: r.clone_url,
+          description: r.description ?? '',
+          pushedAt: r.pushed_at,
+          stars: r.stargazers_count,
+          language: r.language,
+        })),
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return reply.status(500).send({ error: `Failed to fetch repos: ${message}` })
+    }
+  })
+
   // Create session
   app.post('/api/sessions', async (request, reply) => {
     const body = request.body as any

@@ -11,6 +11,15 @@ export interface SessionListItem {
   lastActivity: number
 }
 
+export interface GitHubRepo {
+  fullName: string
+  cloneUrl: string
+  description: string
+  pushedAt: string
+  stars: number
+  language: string | null
+}
+
 export interface SessionDetail {
   id: string
   repoUrl: string
@@ -46,6 +55,10 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  fetchRepos(): Promise<{ repos: GitHubRepo[] }> {
+    return request('/github/repos')
+  },
+
   createSession(input: CreateSessionInput): Promise<{ id: string; status: string }> {
     return request('/sessions', {
       method: 'POST',
