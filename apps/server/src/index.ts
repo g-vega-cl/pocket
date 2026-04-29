@@ -108,7 +108,7 @@ export async function buildApp(options: BuildOptions) {
     }
 
     try {
-      const res = await fetch('https://api.github.com/user/repos?sort=pushed&per_page=100&direction=desc', {
+      const res = await fetch('https://api.github.com/user/repos?sort=pushed&per_page=5&direction=desc', {
         headers: {
           Authorization: `Bearer ${githubToken}`,
           Accept: 'application/vnd.github.v3+json',
