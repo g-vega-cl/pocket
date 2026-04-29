@@ -563,13 +563,14 @@ The provider is the single point of model-specific knowledge. The agent loop onl
 apps/web/
   src/
     routes/
-      index.tsx              ← session list / new session form
+      index.tsx              ← session list / new session form (TanStack Query)
       sessions/$id.tsx       ← active chat UI (components inlined)
     state/
       events.ts              ← reducer: events[] → derived UI state
     hooks/
       useSessionStream.ts    ← EventSource wrapper, handles reconnect/replay
       usePocketSession.ts    ← main hook combining SSE + REST
+      useRepoDropdown.ts     ← GitHub repo dropdown: query, filter, select
     lib/
       api.ts                 ← typed fetch wrapper for REST endpoints
 ```
@@ -584,6 +585,16 @@ Components (`StatusBadge`, `ToolCallCard`, `PermissionPrompt`) are co-located in
 ### SSR caveat
 
 TanStack Start does SSR. Your existing hydration concern (the `wsUrl` in `useEffect`) generalizes here: anything that depends on `EventSource` must be client-only, since `EventSource` doesn't exist on the server. Wrap session-stream-using components with a "client only" boundary or render a skeleton during SSR.
+
+### Data fetching with TanStack Query
+
+The homepage uses `@tanstack/react-query` for server-state management:
+
+- **`useQuery` for reads** — `listSessions` and `fetchRepos` use `useQuery` with query keys `['sessions']` and `['github', 'repos']`. Results are cached, deduplicated, and refetched intelligently.
+- **`useMutation` for writes** — `createSession` is a mutation that invalidates the sessions cache and navigates on success.
+- **Error surfacing** — Both `useQuery` and `useMutation` expose `error` states that are rendered inline instead of silently swallowed.
+
+This replaces raw `useEffect` + `fetch` calls that were error-prone and harder to test. Custom hooks like `useRepoDropdown` encapsulate query logic + local UI state, keeping the component surface area small.
 
 ---
 

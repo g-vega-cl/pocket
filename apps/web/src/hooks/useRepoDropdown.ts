@@ -1,0 +1,83 @@
+import { useState, useEffect, useRef, useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '#/lib/api.js'
+import type { GitHubRepo } from '#/lib/api.js'
+
+const REPOS_QUERY_KEY = ['github', 'repos'] as const
+
+export function useRepoDropdown() {
+  const { data, isLoading, error } = useQuery({
+    queryKey: REPOS_QUERY_KEY,
+    queryFn: api.fetchRepos,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const [search, setSearch] = useState('')
+  const [isOpen, setIsOpen] = useState(false)
+  const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
+
+  const repos = data?.repos ?? []
+
+  const filteredRepos = useMemo(
+    () =>
+      repos.filter(
+        (r) =>
+          r.fullName.toLowerCase().includes(search.toLowerCase()) ||
+          (r.description || '').toLowerCase().includes(search.toLowerCase()),
+      ),
+    [repos, search],
+  )
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(e.target as Node)
+      ) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  function open() {
+    if (repos.length > 0) {
+      setIsOpen(true)
+    }
+  }
+
+  function close() {
+    setIsOpen(false)
+  }
+
+  function select(repo: GitHubRepo) {
+    setSelectedRepo(repo)
+    setSearch(repo.fullName)
+    close()
+  }
+
+  function updateSearch(value: string) {
+    setSearch(value)
+    if (selectedRepo && selectedRepo.fullName !== value) {
+      setSelectedRepo(null)
+    }
+  }
+
+  return {
+    repos,
+    filteredRepos,
+    isLoading,
+    error,
+    search,
+    updateSearch,
+    isOpen,
+    open,
+    close,
+    select,
+    selectedRepo,
+    dropdownRef,
+  }
+}
