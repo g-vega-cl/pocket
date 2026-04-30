@@ -91,33 +91,38 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 ## Docs
 
-| Document | Description |
-|----------|-------------|
+| Document                             | Description           |
+| ------------------------------------ | --------------------- |
 | [Architecture](docs/Architecture.md) | Full technical design |
-| [User Stories](docs/UserStories.md) | User flows |
+| [User Stories](docs/UserStories.md)  | User flows            |
 
 ## Tool inventory (v1)
 
-| Tool | Read-only | Default | Notes |
-|------|-----------|---------|-------|
-| `read_file` | ✓ | allow | Path bound to workspace |
-| `list_files` | ✓ | allow | Extension filter |
-| `grep` | ✓ | allow | ripgrep fallback |
-| `glob` | ✓ | allow | File pattern matching |
-| `web_fetch` | ✓ | allow | Capped at 100KB |
-| `web_search` | ✓ | allow | OpenRouter-powered |
-| `git_status` / `git_log` / `git_diff` | ✓ | allow | Read-only git |
-| `write_file` | ✗ | conditional | Allow in workspace, ask outside |
-| `edit_file` | ✗ | conditional | String-replace, enforces uniqueness |
-| `git_create_branch` | ✗ | allow | `pocket/{timestamp}-{slug}` |
-| `git_commit` | ✗ | allow | Stages all changes |
-| `git_push` | ✗ | conditional | Protected branch check |
-| `github_create_pr` | ✗ | allow | PR to `main` base branch |
-| `bash` | ✗ | rule-matched | Regex gate, 5-min timeout |
-| `bash_background` | ✗ | rule-matched | Spawn daemon process |
-| `bash_read_output` | ✓ | allow | since_last_read / tail / all |
-| `bash_send_input` | ✗ | ask | Write to process stdin |
-| `bash_kill` | ✗ | allow | SIGTERM → SIGKILL |
-| `list_processes` | ✓ | allow | List background processes |
-| `plan` | ✗ | allow | Agent scratchpad |
-| `todos_write` | ✗ | allow | Task tracking |
+| Tool                                  | Read-only | Default      | Notes                               |
+| ------------------------------------- | --------- | ------------ | ----------------------------------- |
+| `read_file`                           | ✓         | allow        | Path bound to workspace             |
+| `list_files`                          | ✓         | allow        | Extension filter                    |
+| `grep`                                | ✓         | allow        | ripgrep fallback                    |
+| `glob`                                | ✓         | allow        | File pattern matching               |
+| `web_fetch`                           | ✓         | allow        | Capped at 100KB                     |
+| `web_search`                          | ✓         | allow        | OpenRouter-powered                  |
+| `git_status` / `git_log` / `git_diff` | ✓         | allow        | Read-only git                       |
+| `write_file`                          | ✗         | conditional  | Allow in workspace, ask outside     |
+| `edit_file`                           | ✗         | conditional  | String-replace, enforces uniqueness |
+| `git_create_branch`                   | ✗         | allow        | `pocket/{timestamp}-{slug}`         |
+| `git_commit`                          | ✗         | allow        | Stages all changes                  |
+| `git_push`                            | ✗         | conditional  | Protected branch check              |
+| `github_create_pr`                    | ✗         | allow        | PR to `main` base branch            |
+| `bash`                                | ✗         | rule-matched | Regex gate, 5-min timeout           |
+| `bash_background`                     | ✗         | rule-matched | Spawn daemon process                |
+| `bash_read_output`                    | ✓         | allow        | since_last_read / tail / all        |
+| `bash_send_input`                     | ✗         | ask          | Write to process stdin              |
+| `bash_kill`                           | ✗         | allow        | SIGTERM → SIGKILL                   |
+| `list_processes`                      | ✓         | allow        | List background processes           |
+| `plan`                                | ✗         | allow        | Agent scratchpad                    |
+| `todos_write`                         | ✗         | allow        | Task tracking                       |
+
+## TODO - ROADMAP
+
+- [ ] better virtualization?
+- [ ] pre-set up repo with instructions in `README.md`
