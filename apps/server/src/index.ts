@@ -22,6 +22,7 @@ import {
   getWorkspaceDir,
   cloneRepo,
   initLocalRepo,
+  isPodmanAvailable,
 } from '@pocket/tools'
 import type { Event, PocketConfig } from '@pocket/core'
 import { DEFAULT_PROTECTED_BRANCHES } from '@pocket/core'
@@ -43,6 +44,7 @@ function getConfig(): PocketConfig {
     protectedBranches: config.protectedBranches ?? DEFAULT_PROTECTED_BRANCHES,
     processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
     maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
+    defaultSandboxImage: config.defaultSandboxImage ?? 'node:22-alpine',
   }
 }
 
@@ -157,8 +159,9 @@ export async function buildApp(options: BuildOptions) {
       repoUrl: body.repoUrl,
       task: body.task,
       model: body.model,
-        githubToken: body.githubToken || (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN),
+      githubToken: body.githubToken || (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN),
       isLocal: body.isLocal ?? false,
+      sandboxImage: body.sandboxImage,
     })
 
     return {
@@ -168,6 +171,7 @@ export async function buildApp(options: BuildOptions) {
       model: session.model,
       status: session.status,
       createdAt: session.createdAt,
+      sandboxImage: session.sandboxImage,
     }
   })
 
@@ -182,6 +186,7 @@ export async function buildApp(options: BuildOptions) {
       status: s.status,
       createdAt: s.createdAt,
       lastActivity: s.lastActivity,
+      sandboxImage: s.sandboxImage,
     }))
     return { sessions }
   })
@@ -398,7 +403,8 @@ export async function buildApp(options: BuildOptions) {
 Repository: ${session.repoUrl}
 Task: ${session.task}
 Branch: ${session.branchName ?? 'N/A'}
-Status: ${session.status}
+Status: ${session.status}${session.sandboxImage ? `
+Sandbox: ${session.sandboxImage}` : ''}
 
 Use tools to explore and make changes as needed.
 
@@ -414,6 +420,7 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
       startingSeq: session.nextSeq,
       workspaceRoot,
       githubToken: session.githubToken,
+      sandboxImage: session.sandboxImage,
       permissionGate,
       onPermissionAlwaysAllow: (toolName) => {
         sessionManager.persistPermissionRule(id, toolName, 'allow')
@@ -587,6 +594,10 @@ const isMainModule = process.argv[1]?.includes('index.ts') || process.argv[1]?.i
 if (isMainModule) {
   const PORT = parseInt(process.env.PORT || '5173', 10)
   const sessionsDir = path.join(os.homedir(), '.pocket', 'sessions')
+
+  if (!isPodmanAvailable()) {
+    console.warn('[Pocket] Podman not found. Sandbox isolation is disabled. Install podman for sandbox support.')
+  }
 
   buildApp({ sessionsDir }).then(app => {
     return app.listen({ port: PORT, host: '0.0.0.0' })

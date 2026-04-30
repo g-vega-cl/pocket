@@ -12,6 +12,7 @@ interface CreateSessionInput {
   model: string
   isLocal?: boolean
   githubToken?: string
+  sandboxImage?: string
 }
 
 const CONFIG_PATH = '.pocket/config.json'
@@ -50,6 +51,8 @@ export class SessionManager {
     const id = 'sess_' + Math.random().toString(36).substring(2, 15)
     const now = Date.now()
 
+    const config = this.getConfig()
+
     const meta: SessionMeta = {
       id,
       repoUrl: input.repoUrl,
@@ -63,6 +66,7 @@ export class SessionManager {
       nextSeq: 1,
       isLocal: input.isLocal ?? false,
       githubToken: input.githubToken,
+      sandboxImage: input.sandboxImage ?? config.defaultSandboxImage,
     }
 
     this.sessions.set(id, meta)
@@ -162,6 +166,7 @@ export class SessionManager {
       protectedBranches: config.protectedBranches ?? DEFAULT_PROTECTED_BRANCHES,
       processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
       maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
+      defaultSandboxImage: config.defaultSandboxImage ?? 'node:22-alpine',
     }
   }
 

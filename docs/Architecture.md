@@ -446,6 +446,88 @@ Sending input to a running process is rare and almost always indicates the agent
 
 Related question this raises: foreground `bash` needs a timeout, otherwise an agent that accidentally runs `npm run dev` (instead of `bash_background`) hangs the session forever. Default: **5 minutes**, configurable per-call up to 30 minutes. On timeout, the process gets SIGTERM, output is returned with `{ timedOut: true }`, and the agent can decide whether to re-run as background. This is a one-line addition to the existing bash tool, but it's load-bearing.
 
+### Sandboxed execution
+
+Bash commands (foreground and background) optionally run inside ephemeral Podman containers instead of directly on the host. This isolates build toolchains — no global npm, Python, or compiler installs on the server.
+
+#### How it works
+
+```
+Agent calls bash({ command: "tsc --noEmit" })
+  │
+  ▼
+ctx.sandboxImage === "node:22-alpine" ?
+  YES → podman run --rm -v {workspace}:/work:Z -w /work node:22-alpine sh -c "tsc --noEmit"
+  NO  → execAsync("tsc --noEmit", { cwd: workspaceRoot })  // direct on host (existing behavior)
+  │
+  ▼
+Returns { stdout, stderr, exitCode } — identical shape either way. The LLM sees no difference.
+```
+
+#### Container lifecycle
+
+- **Ephemeral:** `--rm` flag destroys the container after the command exits. No state accumulation across sessions.
+- **Workspace mount:** `-v {workspaceRoot}:/work:Z` — the `:Z` relabel handles SELinux on Fedora. Both Pocket (host) and the sandbox (container) see the same files. Files created by `npm install` inside the sandbox land in the host workspace.
+- **Rootless:** Podman runs as the user, no daemon. Container `root` maps to the host UID, so file ownership is correct.
+- **Network:** Allowed by default (`npm install`, `pip install`, `cargo build` need it). No `--network none` unless explicitly configured later.
+
+#### Configuration
+
+```json
+// ~/.pocket/config.json
+{
+  "defaultSandboxImage": "node:22-alpine"   // applied to all sessions
+}
+```
+
+Per-session override on creation:
+
+```ts
+POST /api/sessions
+{
+  "repoUrl": "...",
+  "task": "...",
+  "model": "...",
+  "sandboxImage": "python:3.12-slim"   // overrides default
+}
+```
+
+#### Supported images
+
+| Image | Size | Has |
+|---|---|---|
+| `node:22-alpine` (default) | ~48MB | Node 22, npm, npx, pnpm, yarn |
+| `python:3.12-slim` | ~55MB | Python 3.12, pip |
+| `rust:1-alpine` | ~100MB | Rust, cargo |
+| `nikolaik/python-nodejs` | ~200MB | Node 22 + Python 3.12 |
+
+Any Podman-compatible OCI image works. The image is pulled on first use (on demand), and cached by Podman afterward.
+
+#### Graceful fallback
+
+- If Podman is not installed → sandbox is disabled. Bash commands run directly on the host (existing behavior). A warning is logged at server startup: `[Pocket] Podman not found. Sandbox isolation is disabled.`
+- If `sandboxImage` is not configured (no config, no session override) → bash runs directly on the host. Fully backward compatible.
+- If a session has no `sandboxImage` set → the `ctx.sandboxImage` field is `undefined`, and `bashTool.call()` falls through to the existing `execAsync` path.
+
+#### Implementation
+
+| File | Role |
+|---|---|
+| `packages/tools/src/sandbox.ts` | `isPodmanAvailable()`, `runInSandbox()`, `spawnInSandbox()` |
+| `packages/tools/src/bash.ts` | Routes through `runInSandbox` when `ctx.sandboxImage` is set |
+| `packages/agent/src/process-manager.ts` | `spawn()` accepts optional `sandboxImage` — constructs podman command for background processes |
+| `packages/tools/src/background.ts` | Passes `ctx.sandboxImage` to `ProcessManager.spawn()` |
+| `packages/agent/src/agent-runner.ts` | Stores `sandboxImage`, passes to `ToolContext`, includes in system prompt (`Sandbox: node:22-alpine`) |
+| `packages/agent/src/session-manager.ts` | Stores `sandboxImage` in session metadata, defaults from config |
+| `apps/server/src/index.ts` | Accepts `sandboxImage` on `POST /api/sessions`, podman check at startup |
+| `packages/core/src/index.ts` | `sandboxImage` field on `ToolContext`, `SessionMeta`, `PocketConfig` |
+
+#### What sandboxing does NOT cover
+
+- **File operations** (`read_file`, `write_file`, `edit_file`, `grep`, `glob`) — these run on the host filesystem. They don't need build tools, and they're already path-isolated via `resolvePath`.
+- **Git operations** — clone, commit, push run on the host using the real git binary. The workspace filesystem is shared between host and sandbox, so changes made by either side are visible to the other.
+- **LLM calls / web fetches** — OpenRouter API calls and `web_fetch`/`web_search` run from the Pocket process directly. These don't need a build toolchain.
+
 ---
 
 
@@ -736,6 +818,13 @@ Each milestone was independently shippable and testable.
 - Per-turn message reconstruction (tool calls grouped by assistant response, not lumped)
 - Duplicate write tool call detection (blocks identical calls after 3 repeats in one turn)
 
+**M7 — Sandbox isolation** ✓
+- Podman-based ephemeral containers for bash commands
+- `sandboxImage` config: default `node:22-alpine`, per-session override
+- Graceful fallback to host execution when Podman unavailable
+- Sandbox-aware `ProcessManager.spawn()` for background processes
+- `Sandbox: {image}` line in system prompt so the LLM knows its toolchain
+
 ---
 
 ## 17. URL persistence (carried over from your old design)
@@ -760,6 +849,7 @@ Resolved during implementation:
 4. **HTTP framework** — Fastify (not Express). Chosen for better SSE support and performance.
 5. **Monorepo tool** — pnpm workspaces (not Nx). Simpler, fewer dependencies, already working.
 6. **Message reconstruction from event log** — `buildMessages()` groups tool calls per `assistant_text_done` boundary so multi-turn sessions maintain correct LLM context. Earlier v1 lumped all tool calls onto the last assistant message, which corrupted history and caused loop stalls on flash models.
+7. **Sandbox isolation** — bash commands run in ephemeral Podman containers when `sandboxImage` is configured. `packages/tools/src/sandbox.ts` provides `runInSandbox()` and `spawnInSandbox()` using `podman run --rm -v {ws}:/work:Z`. Falls back to direct host execution if Podman isn't installed. Default image: `node:22-alpine`. Per-session override via API.
 
 Still open:
 - **Web push** — deferred to v1.5 per §6.

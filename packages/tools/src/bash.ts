@@ -21,6 +21,22 @@ export const bashTool: Tool<BashInput, { stdout: string; stderr: string; success
   async *call(input: BashInput, ctx: ToolContext): AsyncGenerator<Progress, { stdout: string; stderr: string; success: boolean; exitCode?: number; timedOut?: boolean }> {
     yield { type: 'progress', message: `Running: ${input.command}` }
 
+    if (ctx.sandboxImage) {
+      const { runInSandbox } = await import('./sandbox.js')
+      const result = await runInSandbox(input.command, {
+        image: ctx.sandboxImage,
+        workspaceRoot: ctx.workspaceRoot,
+        timeout: 300000,
+      })
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr,
+        success: result.exitCode === 0,
+        exitCode: result.exitCode,
+        timedOut: result.timedOut,
+      }
+    }
+
     try {
       const { stdout, stderr } = await execAsync(input.command, {
         cwd: ctx.workspaceRoot,

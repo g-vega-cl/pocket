@@ -50,15 +50,43 @@ Access: `http://localhost:3000`
 
 Point your tunnel to `http://localhost:3000`. SSE heartbeats every 15s keep the tunnel alive. Vite proxies `/api` requests to the server on `:5173`.
 
+## Sandbox isolation
+
+Bash commands run in ephemeral Podman containers instead of directly on the host. No global installs of TypeScript, Python, or other build tools needed.
+
+```
+Agent calls bash({ command: "tsc --noEmit" })
+  → podman run --rm -v workspace:/work:Z -w /work node:22-alpine sh -c "tsc --noEmit"
+```
+
+**Requirements:** Podman (pre-installed on Fedora, `brew install podman` on macOS).
+
+**Default image:** `node:22-alpine`. Override per session or globally:
+
+```json
+// ~/.pocket/config.json
+{ "defaultSandboxImage": "node:22-alpine" }
+```
+
+```bash
+# Per-session override on creation
+POST /api/sessions
+{ "sandboxImage": "python:3.12-slim" }
+```
+
+Common images: `python:3.12-slim`, `rust:1-alpine`, `nikolaik/python-nodejs` (JS + Python).
+
+If Podman isn't installed, sandbox is silently disabled — bash runs on the host as before.
+
 ## Test
 
 ```bash
-pnpm -r test              # All 167 tests across 6 packages
+pnpm -r test              # All 203 tests across 6 packages
 # or individually:
-pnpm --filter @pocket/agent test      # 75 tests
-pnpm --filter @pocket/tools test      # 52 tests
-pnpm --filter web test                # 12 tests
-pnpm --filter @pocket/server test     #  8 tests
+pnpm --filter @pocket/agent test      # 80 tests
+pnpm --filter @pocket/tools test      # 68 tests
+pnpm --filter web test                # 22 tests
+pnpm --filter @pocket/server test     # 13 tests
 pnpm --filter @pocket/core test       #  9 tests
 pnpm --filter @pocket/llm test        # 11 tests
 ```
@@ -113,8 +141,8 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 | `git_commit`                          | ✗         | allow        | Stages all changes                  |
 | `git_push`                            | ✗         | conditional  | Protected branch check              |
 | `github_create_pr`                    | ✗         | allow        | PR to `main` base branch            |
-| `bash`                                | ✗         | rule-matched | Regex gate, 5-min timeout           |
-| `bash_background`                     | ✗         | rule-matched | Spawn daemon process                |
+| `bash`                                | ✗         | rule-matched | Regex gate, 5-min timeout, sandboxed via Podman |
+| `bash_background`                     | ✗         | rule-matched | Spawn daemon process, sandboxed via Podman |
 | `bash_read_output`                    | ✓         | allow        | since_last_read / tail / all        |
 | `bash_send_input`                     | ✗         | ask          | Write to process stdin              |
 | `bash_kill`                           | ✗         | allow        | SIGTERM → SIGKILL                   |
@@ -124,5 +152,5 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 ## TODO - ROADMAP
 
-- [ ] better virtualization?
+- [x] better virtualization
 - [ ] pre-set up repo with instructions in `README.md`
