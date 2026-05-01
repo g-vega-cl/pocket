@@ -128,3 +128,4 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 - [ ] pre-set up repo with instructions in `README.md`
 - [ ] add wrap in my input chat so I can see three lines of text. we can make it scrollable, is this a good practice?
 - [ ] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.
+- [ ] Take inspiration from Bolt.diy and https://github.com/Gitlawb/openclaude
