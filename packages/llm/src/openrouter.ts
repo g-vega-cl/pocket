@@ -45,7 +45,7 @@ export class OpenRouterProvider implements LLMProvider {
         'X-OpenRouter-Cache': 'true',
       },
       body: JSON.stringify({
-        models: req.model === BACKUP_MODEL ? [req.model] : [req.model, req.model, BACKUP_MODEL],
+        models: [req.model, req.model, BACKUP_MODEL],
         messages: this.applyPromptCaching(req.model, req.messages),
         tools: req.tools,
         stream: true,

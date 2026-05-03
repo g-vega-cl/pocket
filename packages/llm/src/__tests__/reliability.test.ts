@@ -108,7 +108,7 @@ describe('OpenRouterProvider Reliability', () => {
     expect(messagesWithCache.length).toBe(4)
   })
 
-  it('should not include BACKUP_MODEL twice if it is the primary model', async () => {
+  it('should include BACKUP_MODEL in the list even if it is the primary model', async () => {
     const req: ChatRequest = {
       model: 'minimax/minimax-m2.5:free',
       messages: [{ role: 'user', content: 'hi' }],
@@ -120,6 +120,6 @@ describe('OpenRouterProvider Reliability', () => {
     const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0]
     const body = JSON.parse(fetchCall[1]!.body as string)
 
-    expect(body.models).toEqual(['minimax/minimax-m2.5:free'])
+    expect(body.models).toEqual(['minimax/minimax-m2.5:free', 'minimax/minimax-m2.5:free', 'minimax/minimax-m2.5:free'])
   })
 })
