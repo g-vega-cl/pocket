@@ -218,6 +218,7 @@ The `call` is an async generator so long-running tools (clone, bash) can stream 
 | `list_processes` | ✓ | allow | list this session's background processes |
 | `plan` | ✗ | allow | writes a plan, sets `awaiting_plan_approval` |
 | `todos_write` | ✗ | allow | agent's own scratchpad task list |
+| `bootstrap_repo` | ✓ | allow | analyzes cloned repo: detects project type, package manager, scripts, config files, runs dependency install |
 
 ### Read-only parallelism
 
@@ -874,6 +875,8 @@ Resolved during implementation:
 5. **Monorepo tool** — pnpm workspaces (not Nx). Simpler, fewer dependencies, already working.
 6. **Message reconstruction from event log** — `buildMessages()` groups tool calls per `assistant_text_done` boundary so multi-turn sessions maintain correct LLM context. Earlier v1 lumped all tool calls onto the last assistant message, which corrupted history and caused loop stalls on flash models.
 7. **Sandbox isolation** — foreground bash commands run in persistent Podman containers. `packages/tools/src/sandbox.ts` provides `ensureContainer()` (starts via `podman run -d --name pocket-{sessionId}`), `execInContainer()` (via `podman exec`), and `stopSandboxContainer()` for cleanup. 30-minute idle timeout. Default image: `nikolaik/python-nodejs:python3.12-nodejs22`. Background processes use ephemeral `--rm` containers.
+
+8. **Auto-bootstrap on clone** — after workspace is ready (cloned + sandbox started), `bootstrap_repo` tool automatically runs. It detects project type (node/python/rust/go), package manager (npm/pnpm/yarn/pip/cargo), scripts from package.json, config files (Vite, React, Next.js, Express, FastAPI, Django), and suggested dev server ports. It runs dependency install in the sandbox. Results are included in the agent's system prompt so the agent knows the exact commands for this repo instead of guessing.
 
 Still open:
 - **Web push** — deferred to v1.5 per §6.

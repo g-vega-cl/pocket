@@ -18,6 +18,7 @@ import {
   gitStatusTool, gitLogTool, gitDiffTool,
   gitCreateBranchTool, gitCommitTool, gitPushTool,
   githubCreatePRTool,
+  bootstrapRepoTool,
   createBackgroundTools,
   getWorkspaceDir,
   cloneRepo,
@@ -278,6 +279,7 @@ export async function buildApp(options: BuildOptions) {
 
     // ─── Workspace setup (first turn only) ────────────────────
     let workspaceRoot = session.localPath
+    let bootstrapResult: any = null
     if (!workspaceRoot) {
       const setupToolCallId = `workspace-setup-${Date.now()}`
       const setupToolName = session.isLocal ? 'init_local_repo' : 'clone_repo'
@@ -391,6 +393,67 @@ export async function buildApp(options: BuildOptions) {
 
           sessionManager.updateSession(id, { nextSeq: session.nextSeq })
         }
+
+        // ─── Auto-bootstrap the repository ─────────────────────────────
+        const bootstrapEvent: Event = {
+          seq: session.nextSeq++,
+          ts: Date.now(),
+          type: 'status',
+          payload: { status: 'working', message: 'Analyzing repository...' },
+        }
+        eventLog.append(id, bootstrapEvent)
+        emitToSession(id, bootstrapEvent)
+
+        try {
+          const bootstrapCtx = {
+            sessionId: id,
+            workspaceRoot: workspaceRoot!,
+            githubToken: session.githubToken,
+            sandboxImage: session.sandboxImage ?? undefined,
+            resolvePath: (inputPath: string) => {
+              if (!workspaceRoot) throw new Error('Workspace not ready')
+              const resolved = path.resolve(workspaceRoot, inputPath)
+              if (!resolved.startsWith(workspaceRoot)) {
+                throw new Error(`Path escapes workspace: ${inputPath}`)
+              }
+              return resolved
+            },
+          }
+
+          const gen = bootstrapRepoTool.call({}, bootstrapCtx)
+          let result = await gen.next()
+          while (!result.done) {
+            const progress = result.value
+            if (progress.type === 'progress') {
+              const progressEvent: Event = {
+                seq: session.nextSeq++,
+                ts: Date.now(),
+                type: 'tool_call_progress',
+                payload: {
+                  toolCallId: 'bootstrap-repo',
+                  toolName: 'bootstrap_repo',
+                  message: progress.message,
+                },
+              }
+              eventLog.append(id, progressEvent)
+              emitToSession(id, progressEvent)
+            }
+            result = await gen.next()
+          }
+          bootstrapResult = result.value
+          sessionManager.updateSession(id, { nextSeq: session.nextSeq })
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          const bootstrapErrorEvent: Event = {
+            seq: session.nextSeq++,
+            ts: Date.now(),
+            type: 'status',
+            payload: { status: 'ready', message: `[warn] Bootstrap issue: ${msg.slice(0, 100)}` },
+          }
+          eventLog.append(id, bootstrapErrorEvent)
+          emitToSession(id, bootstrapErrorEvent)
+          sessionManager.updateSession(id, { nextSeq: session.nextSeq })
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         const errorEvent: Event = {
@@ -437,13 +500,36 @@ export async function buildApp(options: BuildOptions) {
     ])
 
     // Build system prompt
+    let bootstrapInfo = ''
+    if (bootstrapResult) {
+      const { detected, scripts, configFiles, ports, install, warnings } = bootstrapResult
+      const detectedStr = detected.projectType !== 'unknown'
+        ? `Project Type: ${detected.projectType} (${detected.packageManager || 'unknown package manager'})`
+        : 'Project Type: unknown'
+      const scriptsList = Object.keys(scripts).length > 0
+        ? `Available Scripts: ${Object.entries(scripts).map(([k, v]) => `${k}="${v}"`).join(', ')}`
+        : 'Scripts: none detected'
+      const configList = Object.entries(configFiles).filter(([_, v]) => v).map(([k]) => k.replace('has', '')).join(', ')
+      const configStr = configList ? `Detected Config: ${configList}` : ''
+      const portsStr = `Dev Server Port: ${ports.dev} (suggested: ${ports.suggested.join(', ')})`
+      const installStr = install.success ? 'Dependencies: installed successfully' : `Dependencies: install failed (${install.output.slice(0, 100)}...)`
+      const warnStr = warnings.length > 0 ? `Warnings: ${warnings.join('; ')}` : ''
+
+      bootstrapInfo = `
+${detectedStr}
+${scriptsList}
+${configStr}
+${portsStr}
+${installStr}
+${warnStr}
+
+NOTE: Use the exact scripts listed above for THIS repository. Commands vary by project - do not assume standard commands like "npm install" work everywhere. Use what was detected.`
+    }
+
     const systemPrompt = `You are Pocket, an autonomous coding agent.
 
-Repository: ${session.repoUrl}
-Task: ${session.task}
-Branch: ${session.branchName ?? 'N/A'}
-Status: ${session.status}${session.sandboxImage ? `
-Sandbox: ${session.sandboxImage}` : ''}
+Repository: ${session.task}
+Branch: ${session.branchName ?? 'N/A'}${bootstrapInfo}
 
 Use tools to explore and make changes as needed.
 
