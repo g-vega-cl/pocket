@@ -22,18 +22,24 @@ export const bashTool: Tool<BashInput, { stdout: string; stderr: string; success
     yield { type: 'progress', message: `Running: ${input.command}` }
 
     if (ctx.sandboxImage) {
-      const { runInSandbox } = await import('./sandbox.js')
-      const result = await runInSandbox(input.command, {
-        image: ctx.sandboxImage,
-        workspaceRoot: ctx.workspaceRoot,
-        timeout: 300000,
-      })
-      return {
-        stdout: result.stdout,
-        stderr: result.stderr,
-        success: result.exitCode === 0,
-        exitCode: result.exitCode,
-        timedOut: result.timedOut,
+      const { ensureContainer, execInContainer } = await import('./sandbox.js')
+      try {
+        const containerName = await ensureContainer(ctx.sessionId, ctx.sandboxImage, ctx.workspaceRoot)
+        const result = await execInContainer(containerName, input.command, { timeout: 300000 })
+        return {
+          stdout: result.stdout,
+          stderr: result.stderr,
+          success: result.exitCode === 0,
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+        }
+      } catch (error: any) {
+        return {
+          stdout: '',
+          stderr: `[sandbox] Container error: ${error.message}. Install podman or switch to host execution.`,
+          success: false,
+          exitCode: 1,
+        }
       }
     }
 

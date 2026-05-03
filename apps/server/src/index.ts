@@ -23,6 +23,9 @@ import {
   cloneRepo,
   initLocalRepo,
   isPodmanAvailable,
+  killAllContainers,
+  stopSandboxContainer,
+  ensureContainer,
 } from '@pocket/tools'
 import type { Event, PocketConfig } from '@pocket/core'
 import { DEFAULT_PROTECTED_BRANCHES } from '@pocket/core'
@@ -44,7 +47,7 @@ function getConfig(): PocketConfig {
     protectedBranches: config.protectedBranches ?? DEFAULT_PROTECTED_BRANCHES,
     processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
     maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
-    defaultSandboxImage: config.defaultSandboxImage ?? 'node:22-alpine',
+    defaultSandboxImage: config.defaultSandboxImage ?? 'nikolaik/python-nodejs:python3.12-nodejs22',
   }
 }
 
@@ -352,6 +355,42 @@ export async function buildApp(options: BuildOptions) {
         }
         eventLog.append(id, readyEvent)
         emitToSession(id, readyEvent)
+
+        // Eagerly initialize sandbox container (pull image, start container)
+        if (session.sandboxImage && isPodmanAvailable()) {
+          const sandboxStartEvent: Event = {
+            seq: session.nextSeq++,
+            ts: Date.now(),
+            type: 'status',
+            payload: { status: 'ready', message: 'Starting sandbox container...' },
+          }
+          eventLog.append(id, sandboxStartEvent)
+          emitToSession(id, sandboxStartEvent)
+
+          try {
+            await ensureContainer(id, session.sandboxImage, workspaceRoot)
+            const sandboxReadyEvent: Event = {
+              seq: session.nextSeq++,
+              ts: Date.now(),
+              type: 'status',
+              payload: { status: 'ready', message: `Sandbox ready (${session.sandboxImage})` },
+            }
+            eventLog.append(id, sandboxReadyEvent)
+            emitToSession(id, sandboxReadyEvent)
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            const sandboxWarnEvent: Event = {
+              seq: session.nextSeq++,
+              ts: Date.now(),
+              type: 'status',
+              payload: { status: 'ready', message: `[warn] Sandbox unavailable: ${msg}. Bash tool will report errors per-call.` },
+            }
+            eventLog.append(id, sandboxWarnEvent)
+            emitToSession(id, sandboxWarnEvent)
+          }
+
+          sessionManager.updateSession(id, { nextSeq: session.nextSeq })
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         const errorEvent: Event = {
@@ -607,4 +646,13 @@ if (isMainModule) {
     console.error('[Pocket] Failed to start:', err)
     process.exit(1)
   })
+
+  // Clean up all sandbox containers on shutdown
+  const shutdown = async () => {
+    console.log('[Pocket] Shutting down, cleaning up sandbox containers...')
+    await killAllContainers()
+    process.exit(0)
+  }
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }

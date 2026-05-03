@@ -104,6 +104,13 @@ export class SessionManager {
       this.runners.delete(id)
     }
 
+    // Clean up sandbox container
+    if (session.sandboxImage) {
+      import('@pocket/tools').then(({ stopSandboxContainer }) => {
+        stopSandboxContainer(id).catch(() => {})
+      })
+    }
+
     this.sessions.delete(id)
     this.permissionGate?.clearSessionRules(id)
 

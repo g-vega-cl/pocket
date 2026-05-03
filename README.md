@@ -52,31 +52,37 @@ Point your tunnel to `http://localhost:3000`. SSE heartbeats every 15s keep the 
 
 ## Sandbox isolation
 
-Bash commands run in ephemeral Podman containers instead of directly on the host. No global installs of TypeScript, Python, or other build tools needed.
+Bash commands run in persistent Podman containers per session instead of directly on the host. Each session gets one container that stays alive for the session lifetime — tool caches (npm packages, pip, cargo) survive between commands.
 
 ```
+Session starts → container starts (eager init, before agent loop)
 Agent calls bash({ command: "tsc --noEmit" })
-  → podman run --rm -v workspace:/work:Z -w /work node:22-alpine sh -c "tsc --noEmit"
+  → podman exec pocket-{sessionId} sh -c "tsc --noEmit"
+Agent calls bash again → same container, tools cached → instant
+30 min idle → container auto-removed
+Session ends → container cleaned up
 ```
 
 **Requirements:** Podman (pre-installed on Fedora, `brew install podman` on macOS).
 
-**Default image:** `node:22-alpine`. Override per session or globally:
+**Default image:** `nikolaik/python-nodejs:python3.12-nodejs22`. Override per session or globally:
 
 ```json
 // ~/.pocket/config.json
-{ "defaultSandboxImage": "node:22-alpine" }
+{ "defaultSandboxImage": "python:3.12-slim" }
 ```
 
 ```bash
 # Per-session override on creation
 POST /api/sessions
-{ "sandboxImage": "python:3.12-slim" }
+{ "sandboxImage": "rust:1-alpine" }
 ```
 
-Common images: `python:3.12-slim`, `rust:1-alpine`, `nikolaik/python-nodejs` (JS + Python).
+Common images: `node:22-alpine`, `python:3.12-slim`, `rust:1-alpine`, `nikolaik/python-nodejs:python3.12-nodejs22` (default, JS + Python).
 
-If Podman isn't installed, sandbox is silently disabled — bash runs on the host as before.
+If Podman isn't installed, container init emits a warning but does not block — bash commands return errors per-call so the agent and user see them.
+
+**Background processes** (`bash_background`) still use ephemeral containers (`podman run --rm`) — one per process, destroyed on exit.
 
 ## Test
 

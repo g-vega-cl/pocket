@@ -237,11 +237,11 @@ describe('Bash sandbox routing', () => {
     expect(out.stdout).toContain('host')
   })
 
-  it('should attempt sandbox when ctx.sandboxImage is set', async () => {
+  it('should attempt sandbox when ctx.sandboxImage is set (persistent container)', async () => {
     ctx = {
-      sessionId: 'test-sandbox',
+      sessionId: 'test-sandbox-persistent',
       workspaceRoot: tmpDir,
-      sandboxImage: 'node:22-alpine',
+      sandboxImage: 'nikolaik/python-nodejs:python3.12-nodejs22',
       resolvePath: (inputPath: string) => {
         const resolved = path.resolve(tmpDir, inputPath)
         if (!resolved.startsWith(tmpDir)) throw new Error(`Path escapes workspace: ${inputPath}`)
@@ -249,18 +249,17 @@ describe('Bash sandbox routing', () => {
       },
     }
 
-    // With podman not installed, sandbox should throw
-    let threw = false
-    try {
-      const gen = bashTool.call({ command: 'echo test' }, ctx)
-      let result = await gen.next()
-      while (!result.done) result = await gen.next()
-    } catch (err: any) {
-      threw = true
-      expect(err.message).toMatch(/podman|sandbox/i)
+    // On machines with podman, persistent container should work
+    // On machines without podman, it should return an error via the bash tool
+    const gen = bashTool.call({ command: 'echo "hello from container"' }, ctx)
+    let result = await gen.next()
+    while (!result.done) result = await gen.next()
+    const out = result.value as any
+
+    if (out.success) {
+      expect(out.stdout).toContain('hello from container')
+    } else {
+      expect(out.stderr).toMatch(/podman|sandbox|container/i)
     }
-    // On machines without podman, sandbox path will throw
-    // On machines with podman, it will succeed — either is fine
-    expect(threw || true).toBe(true)
   })
 })
