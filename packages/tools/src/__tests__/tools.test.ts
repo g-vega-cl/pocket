@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -159,7 +159,6 @@ describe('File tools integration', () => {
     let result = await gen.next()
     while (!result.done) result = await gen.next()
     const files = result.value as string[]
-    // All returned files should end with .ts
     for (const f of files) {
       expect(f.endsWith('.ts')).toBe(true)
     }
@@ -200,5 +199,67 @@ describe('File tools integration', () => {
   it('should validate bash schema', () => {
     expect(bashTool.inputSchema.safeParse({ command: 'ls' }).success).toBe(true)
     expect(bashTool.inputSchema.safeParse({}).success).toBe(false)
+  })
+})
+
+describe('Bash sandbox routing', () => {
+  let tmpDir: string
+  let ctx: ToolContext
+
+  beforeEach(() => {
+    vi.resetModules()
+    tmpDir = path.join(os.tmpdir(), `pocket-sandbox-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    fs.mkdirSync(tmpDir, { recursive: true })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    fs.rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('should fall back to direct exec when ctx.sandboxImage is not set (default behavior)', async () => {
+    ctx = {
+      sessionId: 'test-direct',
+      workspaceRoot: tmpDir,
+      resolvePath: (inputPath: string) => {
+        const resolved = path.resolve(tmpDir, inputPath)
+        if (!resolved.startsWith(tmpDir)) throw new Error(`Path escapes workspace: ${inputPath}`)
+        return resolved
+      },
+    }
+
+    const gen = bashTool.call({ command: 'echo "host"' }, ctx)
+    let result = await gen.next()
+    while (!result.done) result = await gen.next()
+    const out = result.value as any
+
+    expect(out.success).toBe(true)
+    expect(out.stdout).toContain('host')
+  })
+
+  it('should attempt sandbox when ctx.sandboxImage is set (persistent container)', async () => {
+    ctx = {
+      sessionId: 'test-sandbox-persistent',
+      workspaceRoot: tmpDir,
+      sandboxImage: 'nikolaik/python-nodejs:python3.12-nodejs22',
+      resolvePath: (inputPath: string) => {
+        const resolved = path.resolve(tmpDir, inputPath)
+        if (!resolved.startsWith(tmpDir)) throw new Error(`Path escapes workspace: ${inputPath}`)
+        return resolved
+      },
+    }
+
+    // On machines with podman, persistent container should work
+    // On machines without podman, it should return an error via the bash tool
+    const gen = bashTool.call({ command: 'echo "hello from container"' }, ctx)
+    let result = await gen.next()
+    while (!result.done) result = await gen.next()
+    const out = result.value as any
+
+    if (out.success) {
+      expect(out.stdout).toContain('hello from container')
+    } else {
+      expect(out.stderr).toMatch(/podman|sandbox|container/i)
+    }
   })
 })

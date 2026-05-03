@@ -16,6 +16,7 @@ interface AgentRunnerOptions {
   startingSeq?: number
   workspaceRoot?: string
   githubToken?: string
+  sandboxImage?: string
   onEvent?: (event: Event) => void
   permissionGate?: PermissionGate
   onPermissionAlwaysAllow?: (toolName: string) => void
@@ -34,6 +35,7 @@ export class AgentRunner {
   private onEvent?: (event: Event) => void
   private workspaceRoot: string
   private githubToken?: string
+  private sandboxImage?: string
   private permissionGate?: PermissionGate
   private onPermissionAlwaysAllow?: (toolName: string) => void
   private recentToolCallKeys: string[] = []
@@ -56,6 +58,7 @@ export class AgentRunner {
     this.onEvent = options.onEvent
     this.workspaceRoot = options.workspaceRoot ?? ''
     this.githubToken = options.githubToken
+    this.sandboxImage = options.sandboxImage
     this.permissionGate = options.permissionGate
     this.onPermissionAlwaysAllow = options.onPermissionAlwaysAllow
     this.recentToolCallKeys = []
@@ -360,6 +363,7 @@ export class AgentRunner {
       sessionId: this.sessionId,
       workspaceRoot: this.workspaceRoot,
       githubToken: this.githubToken,
+      sandboxImage: this.sandboxImage,
       resolvePath: (inputPath: string) => {
         const resolved = path.resolve(this.workspaceRoot, inputPath)
         if (!resolved.startsWith(this.workspaceRoot)) {

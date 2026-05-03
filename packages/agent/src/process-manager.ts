@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import type { ChildProcess } from 'node:child_process'
+import { execSync } from 'node:child_process'
 import { RingBuffer } from './ring-buffer.js'
 import type { BackgroundProcess, BashReadResult } from '@pocket/core'
 
@@ -24,7 +25,7 @@ export class ProcessManager {
     return this.processes.size >= this.maxProcesses
   }
 
-  spawn(command: string, cwd: string): Promise<BackgroundProcess> {
+  spawn(command: string, cwd: string, sandboxImage?: string): Promise<BackgroundProcess> {
     return new Promise((resolve, reject) => {
       if (this.isFull()) {
         reject(new Error(`Maximum background processes (${this.maxProcesses}) reached`))
@@ -32,11 +33,30 @@ export class ProcessManager {
       }
 
       const id = `proc_${Date.now().toString(36)}_${++this.idCounter}`
-      const proc = spawn('sh', ['-c', command], {
-        cwd,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        detached: false,
-      })
+
+      let proc: ChildProcess
+      if (sandboxImage) {
+        if (!this.podmanAvailable()) {
+          reject(new Error('Podman is not available. Install podman or disable sandbox in config.'))
+          return
+        }
+        proc = spawn('podman', [
+          'run', '--rm',
+          '-v', `${cwd}:/work:Z`,
+          '-w', '/work',
+          sandboxImage,
+          'sh', '-c', command,
+        ], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          detached: false,
+        })
+      } else {
+        proc = spawn('sh', ['-c', command], {
+          cwd,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          detached: false,
+        })
+      }
 
       const stdoutBuf = new RingBuffer(this.bufferSize)
       const stderrBuf = new RingBuffer(this.bufferSize)
@@ -174,5 +194,14 @@ export class ProcessManager {
   cleanup(): void {
     this.killAll()
     this.processes.clear()
+  }
+
+  private podmanAvailable(): boolean {
+    try {
+      const stdout = execSync('command -v podman', { encoding: 'utf-8', timeout: 5000 })
+      return stdout.trim().length > 0
+    } catch {
+      return false
+    }
   }
 }

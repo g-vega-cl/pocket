@@ -24,7 +24,7 @@ export function createBackgroundTools(getProcessManager: () => any) {
         throw new Error(`Maximum background processes (${pm.listProcesses().length}) reached. Kill some first.`)
       }
 
-      const proc = await pm.spawn(input.command, input.cwd || ctx.workspaceRoot)
+      const proc = await pm.spawn(input.command, input.cwd || ctx.workspaceRoot, ctx.sandboxImage)
       return { id: proc.id, pid: proc.pid }
     },
   }

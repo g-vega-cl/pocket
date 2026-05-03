@@ -61,6 +61,7 @@ export interface SessionMeta {
   nextSeq: number
   isLocal: boolean
   githubToken?: string
+  sandboxImage?: string
 }
 
 // ─── Messages (§4, §10) ────────────────────────────────────
@@ -101,6 +102,7 @@ export interface ToolContext {
   sessionId: string
   workspaceRoot: string
   githubToken?: string
+  sandboxImage?: string
   resolvePath: (inputPath: string) => string
 }
 
@@ -154,6 +156,7 @@ export interface PocketConfig {
   protectedBranches: string[]
   processBufferSize: number
   maxBackgroundProcesses: number
+  defaultSandboxImage: string
 }
 
 export const DEFAULT_PROTECTED_BRANCHES = ['main', 'master', 'develop', 'pocket', 'staging', 'production']

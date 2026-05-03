@@ -50,15 +50,49 @@ Access: `http://localhost:3000`
 
 Point your tunnel to `http://localhost:3000`. SSE heartbeats every 15s keep the tunnel alive. Vite proxies `/api` requests to the server on `:5173`.
 
+## Sandbox isolation
+
+Bash commands run in persistent Podman containers per session instead of directly on the host. Each session gets one container that stays alive for the session lifetime — tool caches (npm packages, pip, cargo) survive between commands.
+
+```
+Session starts → container starts (eager init, before agent loop)
+Agent calls bash({ command: "tsc --noEmit" })
+  → podman exec pocket-{sessionId} sh -c "tsc --noEmit"
+Agent calls bash again → same container, tools cached → instant
+30 min idle → container auto-removed
+Session ends → container cleaned up
+```
+
+**Requirements:** Podman (pre-installed on Fedora, `brew install podman` on macOS).
+
+**Default image:** `nikolaik/python-nodejs:python3.12-nodejs22`. Override per session or globally:
+
+```json
+// ~/.pocket/config.json
+{ "defaultSandboxImage": "python:3.12-slim" }
+```
+
+```bash
+# Per-session override on creation
+POST /api/sessions
+{ "sandboxImage": "rust:1-alpine" }
+```
+
+Common images: `node:22-alpine`, `python:3.12-slim`, `rust:1-alpine`, `nikolaik/python-nodejs:python3.12-nodejs22` (default, JS + Python).
+
+If Podman isn't installed, container init emits a warning but does not block — bash commands return errors per-call so the agent and user see them.
+
+**Background processes** (`bash_background`) still use ephemeral containers (`podman run --rm`) — one per process, destroyed on exit.
+
 ## Test
 
 ```bash
-pnpm -r test              # All 167 tests across 6 packages
+pnpm -r test              # All 203 tests across 6 packages
 # or individually:
-pnpm --filter @pocket/agent test      # 75 tests
-pnpm --filter @pocket/tools test      # 52 tests
-pnpm --filter web test                # 12 tests
-pnpm --filter @pocket/server test     #  8 tests
+pnpm --filter @pocket/agent test      # 80 tests
+pnpm --filter @pocket/tools test      # 68 tests
+pnpm --filter web test                # 22 tests
+pnpm --filter @pocket/server test     # 13 tests
 pnpm --filter @pocket/core test       #  9 tests
 pnpm --filter @pocket/llm test        # 11 tests
 ```
@@ -113,8 +147,8 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 | `git_commit`                          | ✗         | allow        | Stages all changes                  |
 | `git_push`                            | ✗         | conditional  | Protected branch check              |
 | `github_create_pr`                    | ✗         | allow        | PR to `main` base branch            |
-| `bash`                                | ✗         | rule-matched | Regex gate, 5-min timeout           |
-| `bash_background`                     | ✗         | rule-matched | Spawn daemon process                |
+| `bash`                                | ✗         | rule-matched | Regex gate, 5-min timeout, sandboxed via Podman |
+| `bash_background`                     | ✗         | rule-matched | Spawn daemon process, sandboxed via Podman |
 | `bash_read_output`                    | ✓         | allow        | since_last_read / tail / all        |
 | `bash_send_input`                     | ✗         | ask          | Write to process stdin              |
 | `bash_kill`                           | ✗         | allow        | SIGTERM → SIGKILL                   |
@@ -124,7 +158,7 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 ## TODO - ROADMAP
 
-- [ ] better virtualization?
+- [x] better virtualization
 - [ ] pre-set up repo with instructions in `README.md`
 - [ ] add wrap in my input chat so I can see three lines of text. we can make it scrollable, is this a good practice?
 - [ ] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.

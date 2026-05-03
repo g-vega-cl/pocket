@@ -22,6 +22,10 @@ import {
   getWorkspaceDir,
   cloneRepo,
   initLocalRepo,
+  isPodmanAvailable,
+  killAllContainers,
+  stopSandboxContainer,
+  ensureContainer,
 } from '@pocket/tools'
 import type { Event, PocketConfig } from '@pocket/core'
 import { DEFAULT_PROTECTED_BRANCHES } from '@pocket/core'
@@ -43,6 +47,7 @@ function getConfig(): PocketConfig {
     protectedBranches: config.protectedBranches ?? DEFAULT_PROTECTED_BRANCHES,
     processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
     maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
+    defaultSandboxImage: config.defaultSandboxImage ?? 'nikolaik/python-nodejs:python3.12-nodejs22',
   }
 }
 
@@ -157,8 +162,9 @@ export async function buildApp(options: BuildOptions) {
       repoUrl: body.repoUrl,
       task: body.task,
       model: body.model,
-        githubToken: body.githubToken || (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN),
+      githubToken: body.githubToken || (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN),
       isLocal: body.isLocal ?? false,
+      sandboxImage: body.sandboxImage,
     })
 
     return {
@@ -168,6 +174,7 @@ export async function buildApp(options: BuildOptions) {
       model: session.model,
       status: session.status,
       createdAt: session.createdAt,
+      sandboxImage: session.sandboxImage,
     }
   })
 
@@ -182,6 +189,7 @@ export async function buildApp(options: BuildOptions) {
       status: s.status,
       createdAt: s.createdAt,
       lastActivity: s.lastActivity,
+      sandboxImage: s.sandboxImage,
     }))
     return { sessions }
   })
@@ -347,6 +355,42 @@ export async function buildApp(options: BuildOptions) {
         }
         eventLog.append(id, readyEvent)
         emitToSession(id, readyEvent)
+
+        // Eagerly initialize sandbox container (pull image, start container)
+        if (session.sandboxImage && isPodmanAvailable()) {
+          const sandboxStartEvent: Event = {
+            seq: session.nextSeq++,
+            ts: Date.now(),
+            type: 'status',
+            payload: { status: 'ready', message: 'Starting sandbox container...' },
+          }
+          eventLog.append(id, sandboxStartEvent)
+          emitToSession(id, sandboxStartEvent)
+
+          try {
+            await ensureContainer(id, session.sandboxImage, workspaceRoot)
+            const sandboxReadyEvent: Event = {
+              seq: session.nextSeq++,
+              ts: Date.now(),
+              type: 'status',
+              payload: { status: 'ready', message: `Sandbox ready (${session.sandboxImage})` },
+            }
+            eventLog.append(id, sandboxReadyEvent)
+            emitToSession(id, sandboxReadyEvent)
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            const sandboxWarnEvent: Event = {
+              seq: session.nextSeq++,
+              ts: Date.now(),
+              type: 'status',
+              payload: { status: 'ready', message: `[warn] Sandbox unavailable: ${msg}. Bash tool will report errors per-call.` },
+            }
+            eventLog.append(id, sandboxWarnEvent)
+            emitToSession(id, sandboxWarnEvent)
+          }
+
+          sessionManager.updateSession(id, { nextSeq: session.nextSeq })
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
         const errorEvent: Event = {
@@ -398,7 +442,8 @@ export async function buildApp(options: BuildOptions) {
 Repository: ${session.repoUrl}
 Task: ${session.task}
 Branch: ${session.branchName ?? 'N/A'}
-Status: ${session.status}
+Status: ${session.status}${session.sandboxImage ? `
+Sandbox: ${session.sandboxImage}` : ''}
 
 Use tools to explore and make changes as needed.
 
@@ -414,6 +459,7 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
       startingSeq: session.nextSeq,
       workspaceRoot,
       githubToken: session.githubToken,
+      sandboxImage: session.sandboxImage,
       permissionGate,
       onPermissionAlwaysAllow: (toolName) => {
         sessionManager.persistPermissionRule(id, toolName, 'allow')
@@ -588,6 +634,10 @@ if (isMainModule) {
   const PORT = parseInt(process.env.PORT || '5173', 10)
   const sessionsDir = path.join(os.homedir(), '.pocket', 'sessions')
 
+  if (!isPodmanAvailable()) {
+    console.warn('[Pocket] Podman not found. Sandbox isolation is disabled. Install podman for sandbox support.')
+  }
+
   buildApp({ sessionsDir }).then(app => {
     return app.listen({ port: PORT, host: '0.0.0.0' })
   }).then(() => {
@@ -596,4 +646,13 @@ if (isMainModule) {
     console.error('[Pocket] Failed to start:', err)
     process.exit(1)
   })
+
+  // Clean up all sandbox containers on shutdown
+  const shutdown = async () => {
+    console.log('[Pocket] Shutting down, cleaning up sandbox containers...')
+    await killAllContainers()
+    process.exit(0)
+  }
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
 }
