@@ -19,6 +19,7 @@ const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
 }
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
+const BACKUP_MODEL = 'minimax/minimax-m2.5:free'
 
 export class OpenRouterProvider implements LLMProvider {
   private apiKey: string
@@ -41,10 +42,11 @@ export class OpenRouterProvider implements LLMProvider {
         Authorization: `Bearer ${this.apiKey}`,
         'HTTP-Referer': this.httpReferer,
         'X-Title': this.title,
+        'X-OpenRouter-Cache': 'true',
       },
       body: JSON.stringify({
-        model: req.model,
-        messages: req.messages,
+        models: req.model === BACKUP_MODEL ? [req.model] : [req.model, BACKUP_MODEL],
+        messages: this.applyPromptCaching(req.model, req.messages),
         tools: req.tools,
         stream: true,
         max_tokens: req.maxTokens ?? 16384,
@@ -191,5 +193,46 @@ export class OpenRouterProvider implements LLMProvider {
     }
 
     return { contextWindow: 128000, supportsTools: true, supportsReasoning: false }
+  }
+
+  private applyPromptCaching(model: string, messages: Message[]): any[] {
+    if (!model.startsWith('anthropic/')) {
+      return messages
+    }
+
+    // Anthropic prompt caching logic
+    // Anthropic allows up to 4 breakpoints.
+    // We'll mark the system message (if present) and then work backwards from the end.
+
+    const breakpoints: number[] = []
+
+    // 1. Mark system message if it exists
+    const systemIndex = messages.findIndex(m => m.role === 'system')
+    if (systemIndex !== -1) {
+      breakpoints.push(systemIndex)
+    }
+
+    // 2. Add breakpoints from the end of the conversation, up to the limit of 4 total
+    for (let i = messages.length - 1; i >= 0 && breakpoints.length < 4; i--) {
+      if (!breakpoints.includes(i)) {
+        breakpoints.push(i)
+      }
+    }
+
+    return messages.map((msg, index) => {
+      if (breakpoints.includes(index)) {
+        return {
+          ...msg,
+          content: [
+            {
+              type: 'text',
+              text: msg.content || '',
+              cache_control: { type: 'ephemeral' },
+            },
+          ],
+        }
+      }
+      return msg
+    })
   }
 }

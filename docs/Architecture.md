@@ -158,7 +158,12 @@ async function* runTurn(session: Session, userMessage: Message) {
 **What's deliberately missing:**
 - No "after-turn auto-commit." Auto-commit happens on a separate user-triggered event or via a tool the agent calls. Bundling it into the loop conflates concerns.
 - No reasoning/thinking handling shown — that's just another delta type the LLM client normalizes.
-- No retries, model fallbacks, or context-collapse — those wrap this loop, they don't pollute it.
+- No manual retries or context-collapse — those wrap this loop, they don't pollute it.
+
+**Reliability & Cost Optimization (v1.1):**
+- **Automatic Fallbacks:** The LLM provider sends a list of models to OpenRouter. If the primary model fails (5xx, rate limits), OpenRouter automatically falls back to `minimax/minimax-m2.5:free`. This provides zero-config reliability.
+- **Response Caching:** The `X-OpenRouter-Cache: true` header is enabled. Identical requests within 5 minutes are served from cache at zero cost.
+- **Prompt Caching:** For Anthropic models, `cache_control` markers are automatically added to the system prompt and recent history (up to 4 breakpoints), reducing costs for long conversations by 90%.
 
 **Loop termination guarantees:**
 - Hard cap on turns per user message (e.g. 50). Prevents runaway loops.
