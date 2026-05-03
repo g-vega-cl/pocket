@@ -20,7 +20,7 @@ describe('OpenRouterProvider Reliability', () => {
     } as Response)
   })
 
-  it('should include BACKUP_MODEL in the models array', async () => {
+  it('should include primary model twice and BACKUP_MODEL in the models array', async () => {
     const req: ChatRequest = {
       model: 'deepseek/deepseek-chat',
       messages: [{ role: 'user', content: 'hi' }],
@@ -32,7 +32,7 @@ describe('OpenRouterProvider Reliability', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
-        body: expect.stringContaining('"models":["deepseek/deepseek-chat","minimax/minimax-m2.5:free"]'),
+        body: expect.stringContaining('"models":["deepseek/deepseek-chat","deepseek/deepseek-chat","minimax/minimax-m2.5:free"]'),
       })
     )
   })
