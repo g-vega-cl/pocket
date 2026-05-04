@@ -555,6 +555,7 @@ async function runWorkspaceSetup(
   bootstrapResults: Map<string, any>,
 ): Promise<void> {
   const id = session.id
+  console.log(`[Pocket] Workspace setup started for session ${id} (repo=${session.repoUrl})`)
   const setupToolCallId = `workspace-setup-${Date.now()}`
   const setupToolName = session.isLocal ? 'init_local_repo' : 'clone_repo'
 
@@ -617,6 +618,8 @@ async function runWorkspaceSetup(
       })
     }
 
+    console.log(`[Pocket] Clone complete for session ${id} at ${workspaceRoot}`)
+
     // Persist localPath and advance nextSeq
     sessionManager.updateSession(id, {
       localPath: workspaceRoot,
@@ -634,8 +637,11 @@ async function runWorkspaceSetup(
     eventLog.append(id, readyEvent)
     emitToSession(id, readyEvent)
 
+    console.log(`[Pocket] Workspace ready for session ${id}`)
+
     // Eagerly initialize sandbox container (pull image, start container)
     if (session.sandboxImage && isPodmanAvailable()) {
+      console.log(`[Pocket] Starting sandbox container (image=${session.sandboxImage}, workspace=${workspaceRoot})`)
       const sandboxStartEvent: Event = {
         seq: session.nextSeq++,
         ts: Date.now(),
@@ -646,7 +652,9 @@ async function runWorkspaceSetup(
       emitToSession(id, sandboxStartEvent)
 
       try {
+        const startTs = Date.now()
         await ensureContainer(id, session.sandboxImage, workspaceRoot)
+        console.log(`[Pocket] Sandbox container ready for session ${id} (took ${Date.now() - startTs}ms)`)
         const sandboxReadyEvent: Event = {
           seq: session.nextSeq++,
           ts: Date.now(),
@@ -657,6 +665,7 @@ async function runWorkspaceSetup(
         emitToSession(id, sandboxReadyEvent)
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
+        console.warn(`[Pocket] Sandbox unavailable for session ${id}: ${msg}`)
         const sandboxWarnEvent: Event = {
           seq: session.nextSeq++,
           ts: Date.now(),
@@ -671,6 +680,7 @@ async function runWorkspaceSetup(
     }
 
     // ─── Auto-bootstrap the repository ─────────────────────────────
+    console.log(`[Pocket] Bootstrapping repository for session ${id}...`)
     const bootstrapEvent: Event = {
       seq: session.nextSeq++,
       ts: Date.now(),
@@ -701,6 +711,7 @@ async function runWorkspaceSetup(
       while (!result.done) {
         const progress = result.value
         if (progress.type === 'progress') {
+          console.log(`[Pocket] Bootstrap: ${progress.message}`)
           const progressEvent: Event = {
             seq: session.nextSeq++,
             ts: Date.now(),
@@ -719,8 +730,10 @@ async function runWorkspaceSetup(
       const bootstrapResult = result.value
       bootstrapResults.set(id, bootstrapResult)
       sessionManager.updateSession(id, { nextSeq: session.nextSeq })
+      console.log(`[Pocket] Bootstrap complete for session ${id}`)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
+      console.warn(`[Pocket] Bootstrap issue for session ${id}: ${msg}`)
       const bootstrapErrorEvent: Event = {
         seq: session.nextSeq++,
         ts: Date.now(),
@@ -733,6 +746,7 @@ async function runWorkspaceSetup(
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err)
+    console.error(`[Pocket] Workspace setup failed for session ${id}: ${message}`)
     const errorEvent: Event = {
       seq: session.nextSeq++,
       ts: Date.now(),

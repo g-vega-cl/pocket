@@ -84,7 +84,10 @@ export async function ensureContainer(
   }
 
   const cmd = `podman run -d --name ${shellEscape(name)} -v ${shellEscape(workspaceRoot)}:/work:Z -w /work ${shellEscape(image)} sleep infinity`
+  console.log(`[Pocket] ensureContainer: ${cmd}`)
+  const startTs = Date.now()
   const { stderr } = await execAsync(cmd, { timeout: 30000 })
+  console.log(`[Pocket] podman run completed in ${Date.now() - startTs}ms`)
   if (stderr) {
     throw new Error(`Failed to start sandbox container: ${stderr.trim()}`)
   }
