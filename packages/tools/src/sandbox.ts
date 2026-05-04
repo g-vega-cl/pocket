@@ -62,11 +62,14 @@ export interface SandboxResult {
   timedOut?: boolean
 }
 
+export type SandboxProgressCallback = (message: string) => void
+
 /** Ensure a persistent container exists for the given session. Starts one if needed. */
 export async function ensureContainer(
   sessionId: string,
   image: string,
   workspaceRoot: string,
+  onProgress?: SandboxProgressCallback,
 ): Promise<string> {
   if (!isPodmanAvailable()) {
     throw new Error('Podman is not available. Install podman or disable sandbox in config.')
@@ -99,11 +102,38 @@ export async function ensureContainer(
 
   const cmd = `podman run -d --name ${shellEscape(name)} -v ${shellEscape(workspaceRoot)}:/work:Z -w /work ${shellEscape(image)} sleep infinity`
   console.log(`[Pocket] ensureContainer: ${cmd}`)
+  onProgress?.(`Pulling image ${image}...`)
   const startTs = Date.now()
-  const { stderr } = await execAsync(cmd, { timeout: 30000 })
-  console.log(`[Pocket] podman run completed in ${Date.now() - startTs}ms`)
-  if (stderr) {
-    throw new Error(`Failed to start sandbox container: ${stderr.trim()}`)
+
+  try {
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 300000 })
+    console.log(`[Pocket] podman run completed in ${Date.now() - startTs}ms`)
+
+    // Log output for debugging - both stdout and stderr can contain useful info
+    if (stdout) {
+      console.log(`[Pocket] podman run stdout: ${stdout.slice(0, 500)}`)
+    }
+    if (stderr) {
+      console.log(`[Pocket] podman run stderr: ${stderr.slice(0, 500)}`)
+    }
+
+    // Check if container actually started by inspecting it
+    try {
+      const inspectResult = execSync(`podman inspect ${shellEscape(name)} --format '{{.State.Status}}'`, { timeout: 5000 })
+      console.log(`[Pocket] Container ${name} status: ${inspectResult}`)
+      onProgress?.(`Container started successfully`)
+    } catch (inspectErr) {
+      console.error(`[Pocket] Container ${name} inspect failed:`, inspectErr)
+      throw new Error(`Container ${name} failed to start. stderr: ${stderr || 'unknown'}`)
+    }
+
+    if (stderr && !stdout) {
+      throw new Error(`Failed to start sandbox container: ${stderr.trim()}`)
+    }
+  } catch (err: any) {
+    const errorMsg = err.message || err.stderr || err.stdout || String(err)
+    console.error(`[Pocket] ensureContainer failed after ${Date.now() - startTs}ms:`, errorMsg)
+    throw new Error(`Failed to start sandbox container: ${errorMsg}`)
   }
 
   const record: ContainerRecord = {

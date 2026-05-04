@@ -11,6 +11,7 @@ function StatusBadge({ status, isThinking }: { status: string; isThinking: boole
   const colors: Record<string, string> = {
     creating: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
     cloning: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
+    sandboxing: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
     ready: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
     working: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
     idle: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
@@ -161,23 +162,29 @@ function SessionChatView() {
           <div className="flex justify-start">
             <div className="max-w-[80%] bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
               <div className="flex items-center gap-2 mb-2">
-                <svg className="animate-spin h-4 w-4 text-[#4FB8B2]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                </svg>
-                <span className="font-medium text-gray-700 dark:text-gray-300">Setting up workspace</span>
+                {status !== 'ready' && (
+                  <svg className="animate-spin h-4 w-4 text-[#4FB8B2]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                )}
+                <span className="font-medium text-gray-700 dark:text-gray-300">
+                  {status === 'ready' ? 'Workspace ready' : 'Setting up workspace'}
+                </span>
               </div>
               <div className="space-y-1 mb-2">
                 {status === 'creating' && <div className="text-xs text-gray-500 dark:text-gray-400">Creating session...</div>}
                 {status === 'cloning' && <div className="text-xs text-gray-500 dark:text-gray-400">Cloning repository...</div>}
-                {status === 'ready' && <div className="text-xs text-gray-500 dark:text-gray-400">Preparing workspace...</div>}
+                {status === 'ready' && <div className="text-xs text-gray-500 dark:text-gray-400">Ready! Send a message to start.</div>}
                 {status === 'working' && <div className="text-xs text-gray-500 dark:text-gray-400">Analyzing repository...</div>}
               </div>
-              <div className="flex gap-1.5">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-              </div>
+              {status !== 'ready' && (
+                <div className="flex gap-1.5">
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                </div>
+              )}
             </div>
           </div>
         )}

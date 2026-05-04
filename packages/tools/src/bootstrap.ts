@@ -4,7 +4,7 @@ import path from 'node:path'
 import { exec, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 import type { Tool, ToolContext, Progress } from '@pocket/core'
-import { execInContainer, ensureContainer } from './sandbox.js'
+import { execInContainer, ensureContainer, type SandboxProgressCallback } from './sandbox.js'
 
 const execAsync = promisify(exec)
 
@@ -198,6 +198,7 @@ async function runInstall(
   packageManager: string | null,
   sandboxImage: string | null,
   sessionId: string,
+  onProgress?: SandboxProgressCallback,
 ): Promise<InstallResult> {
   if (!packageManager || projectType === 'unknown') {
     return { success: false, output: 'No package manager detected' }
@@ -241,8 +242,14 @@ async function runInstall(
 
   try {
     if (sandboxImage) {
-      const containerName = await ensureContainer(sessionId, sandboxImage, rootPath)
-      const result = await execInContainer(containerName, `cd "${rootPath}" && ${installCmd} ${installArgs.join(' ')}`, { timeout: 600000 })
+      onProgress?.('Starting sandbox container...')
+      // Pass onProgress to ensureContainer - it will emit progress during image pull
+      const containerName = await ensureContainer(sessionId, sandboxImage, rootPath, onProgress)
+      onProgress?.('Installing dependencies in sandbox...')
+      const result = await execInContainer(containerName, `cd "${rootPath}" && ${installCmd} ${installArgs.join(' ')}`, {
+        timeout: 600000,
+        onProgress: (msg) => onProgress?.(`[install] ${msg}`),
+      })
       return {
         success: result.exitCode === 0,
         output: result.stdout + result.stderr,
@@ -255,9 +262,11 @@ async function runInstall(
       return { success: true, output: stdout + stderr }
     }
   } catch (error: any) {
+    const errorOutput = error.message || error.stdout || error.stderr || 'Install failed'
+    console.error('[Pocket] Bootstrap install error:', errorOutput)
     return {
       success: false,
-      output: error.message || 'Install failed',
+      output: errorOutput,
     }
   }
 }
@@ -317,13 +326,68 @@ export const bootstrapRepoTool: Tool<BootstrapInput, BootstrapResult> = {
     const languageVersion = detectLanguageVersion(rootPath, projectType)
 
     yield { type: 'progress', message: `Installing dependencies (${packageManager})...` }
-    const install = await runInstall(rootPath, projectType, packageManager, ctx.sandboxImage, ctx.sessionId)
 
-    if (install.success) {
-      yield { type: 'progress', message: 'Dependencies installed successfully' }
+    let install: InstallResult
+
+    // Inline container ensure and install so we can emit progress events
+    if (ctx.sandboxImage && packageManager && projectType !== 'unknown') {
+      yield { type: 'progress', message: `Starting sandbox container (${ctx.sandboxImage})...` }
+      try {
+        await ensureContainer(ctx.sessionId, ctx.sandboxImage, rootPath, (msg) => {
+          console.log(`[Pocket] bootstrap: ${msg}`)
+        })
+        yield { type: 'progress', message: `Installing ${packageManager} dependencies in sandbox...` }
+
+        // Build install command string - in container, workspace is mounted at /work
+        let installCmd = ''
+        if (packageManager === 'pnpm') {
+          installCmd = 'pnpm install'
+        } else if (packageManager === 'yarn') {
+          installCmd = 'yarn install'
+        } else if (packageManager === 'npm') {
+          installCmd = 'npm install'
+        } else if (packageManager === 'pip') {
+          if (fs.existsSync(path.join(rootPath, 'requirements.txt'))) {
+            installCmd = 'pip install -r requirements.txt'
+          } else {
+            installCmd = 'pip install .'
+          }
+        } else {
+          installCmd = 'echo "Unknown package manager"'
+        }
+
+        // Run from /work in container (where workspace is mounted)
+        const result = await execInContainer(`pocket-${ctx.sessionId}`, `cd /work && ${installCmd}`, {
+          timeout: 600000,
+          onProgress: (msg) => console.log(`[Pocket] install: ${msg}`),
+        })
+
+        install = {
+          success: result.exitCode === 0,
+          output: result.stdout + result.stderr,
+        }
+
+        if (install.success) {
+          yield { type: 'progress', message: 'Dependencies installed successfully' }
+        } else {
+          warnings.push(`Dependency install failed: ${install.output.slice(0, 200)}`)
+          yield { type: 'progress', message: `Install issue: ${install.output.slice(0, 100)}...` }
+        }
+      } catch (err: any) {
+        const errorMsg = err.message || err.stdout || err.stderr || String(err)
+        console.error('[Pocket] Bootstrap install error:', errorMsg)
+        install = { success: false, output: errorMsg }
+        warnings.push(`Bootstrap failed: ${errorMsg.slice(0, 200)}`)
+        yield { type: 'progress', message: `Bootstrap error: ${errorMsg.slice(0, 100)}...` }
+      }
     } else {
-      warnings.push(`Dependency install failed: ${install.output.slice(0, 200)}`)
-      yield { type: 'progress', message: `Install issue: ${install.output.slice(0, 100)}...` }
+      install = await runInstall(rootPath, projectType, packageManager, ctx.sandboxImage, ctx.sessionId)
+      if (install.success) {
+        yield { type: 'progress', message: 'Dependencies installed successfully' }
+      } else {
+        warnings.push(`Dependency install failed: ${install.output.slice(0, 200)}`)
+        yield { type: 'progress', message: `Install issue: ${install.output.slice(0, 100)}...` }
+      }
     }
 
     return {

@@ -39,6 +39,7 @@ export interface EventPayloadMap {
 export type SessionStatus =
   | 'creating'
   | 'cloning'
+  | 'sandboxing'
   | 'ready'
   | 'working'
   | 'idle'

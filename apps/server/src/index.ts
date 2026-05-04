@@ -646,14 +646,25 @@ async function runWorkspaceSetup(
         seq: session.nextSeq++,
         ts: Date.now(),
         type: 'status',
-        payload: { status: 'ready', message: 'Starting sandbox container...' },
+        payload: { status: 'sandboxing', message: 'Pulling sandbox image...' },
       }
       eventLog.append(id, sandboxStartEvent)
       emitToSession(id, sandboxStartEvent)
 
       try {
         const startTs = Date.now()
-        await ensureContainer(id, session.sandboxImage, workspaceRoot)
+        await ensureContainer(id, session.sandboxImage, workspaceRoot, (msg) => {
+          console.log(`[Pocket] sandbox: ${msg}`)
+          // Emit progress event so frontend can see what's happening
+          const progressEvent: Event = {
+            seq: session.nextSeq++,
+            ts: Date.now(),
+            type: 'status',
+            payload: { status: 'sandboxing', message: msg },
+          }
+          eventLog.append(id, progressEvent)
+          emitToSession(id, progressEvent)
+        })
         console.log(`[Pocket] Sandbox container ready for session ${id} (took ${Date.now() - startTs}ms)`)
         const sandboxReadyEvent: Event = {
           seq: session.nextSeq++,
@@ -731,6 +742,14 @@ async function runWorkspaceSetup(
       bootstrapResults.set(id, bootstrapResult)
       sessionManager.updateSession(id, { nextSeq: session.nextSeq })
       console.log(`[Pocket] Bootstrap complete for session ${id}`)
+      const readyEvent: Event = {
+        seq: session.nextSeq++,
+        ts: Date.now(),
+        type: 'status',
+        payload: { status: 'ready' },
+      }
+      eventLog.append(id, readyEvent)
+      emitToSession(id, readyEvent)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.warn(`[Pocket] Bootstrap issue for session ${id}: ${msg}`)
