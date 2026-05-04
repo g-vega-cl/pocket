@@ -152,7 +152,11 @@ export async function buildApp(options: BuildOptions) {
     }
   })
 
-  // Create session
+  // Track ongoing workspace setups and bootstrap results
+  const workspaceSetupPromises = new Map<string, Promise<void>>()
+  const bootstrapResults = new Map<string, any>()
+
+  // Create session — kicks off workspace setup immediately
   app.post('/api/sessions', async (request, reply) => {
     const body = request.body as any
     if (!body.repoUrl || !body.task || !body.model) {
@@ -168,7 +172,7 @@ export async function buildApp(options: BuildOptions) {
       sandboxImage: body.sandboxImage,
     })
 
-    return {
+    const resp = {
       id: session.id,
       repoUrl: session.repoUrl,
       task: session.task,
@@ -177,6 +181,22 @@ export async function buildApp(options: BuildOptions) {
       createdAt: session.createdAt,
       sandboxImage: session.sandboxImage,
     }
+
+    // Kick off workspace setup asynchronously — progress is streamed via SSE
+    const setupPromise = runWorkspaceSetup(
+      session,
+      sessionManager,
+      eventLog,
+      emitToSession,
+      options,
+      bootstrapResults,
+    )
+    workspaceSetupPromises.set(session.id, setupPromise)
+    setupPromise.finally(() => {
+      workspaceSetupPromises.delete(session.id)
+    })
+
+    return resp
   })
 
   // List sessions
@@ -277,197 +297,25 @@ export async function buildApp(options: BuildOptions) {
       return reply.status(400).send({ error: 'content is required' })
     }
 
-    // ─── Workspace setup (first turn only) ────────────────────
-    let workspaceRoot = session.localPath
-    let bootstrapResult: any = null
-    if (!workspaceRoot) {
-      const setupToolCallId = `workspace-setup-${Date.now()}`
-      const setupToolName = session.isLocal ? 'init_local_repo' : 'clone_repo'
-
-      // Emit tool_call_start
-      const startEvent: Event = {
-        seq: session.nextSeq++,
-        ts: Date.now(),
-        type: 'tool_call_start',
-        payload: {
-          toolCallId: setupToolCallId,
-          toolName: setupToolName,
-          args: { repoUrl: session.repoUrl, sessionId: id, isLocal: session.isLocal },
-        },
-      }
-      eventLog.append(id, startEvent)
-      emitToSession(id, startEvent)
-
-      // Emit status: cloning
-      const statusEvent: Event = {
-        seq: session.nextSeq++,
-        ts: Date.now(),
-        type: 'status',
-        payload: { status: 'cloning', message: 'Setting up workspace...' },
-      }
-      eventLog.append(id, statusEvent)
-      emitToSession(id, statusEvent)
-
-      try {
-        if (session.isLocal) {
-          workspaceRoot = await initLocalRepo(id, (message) => {
-            const progressEvent: Event = {
-              seq: session.nextSeq++,
-              ts: Date.now(),
-              type: 'tool_call_progress',
-              payload: {
-                toolCallId: setupToolCallId,
-                toolName: setupToolName,
-                message,
-              },
-            }
-            eventLog.append(id, progressEvent)
-            emitToSession(id, progressEvent)
-          })
-        } else {
-          workspaceRoot = await cloneRepo(session.repoUrl, id, session.githubToken, (message) => {
-            const progressEvent: Event = {
-              seq: session.nextSeq++,
-              ts: Date.now(),
-              type: 'tool_call_progress',
-              payload: {
-                toolCallId: setupToolCallId,
-                toolName: setupToolName,
-                message,
-              },
-            }
-            eventLog.append(id, progressEvent)
-            emitToSession(id, progressEvent)
-          })
-        }
-
-        // Persist localPath and advance nextSeq
-        sessionManager.updateSession(id, {
-          localPath: workspaceRoot,
-          status: 'ready',
-          nextSeq: session.nextSeq,
-        })
-
-        // Emit status: ready
-        const readyEvent: Event = {
-          seq: session.nextSeq++,
-          ts: Date.now(),
-          type: 'status',
-          payload: { status: 'ready', message: 'Workspace ready' },
-        }
-        eventLog.append(id, readyEvent)
-        emitToSession(id, readyEvent)
-
-        // Eagerly initialize sandbox container (pull image, start container)
-        if (session.sandboxImage && isPodmanAvailable()) {
-          const sandboxStartEvent: Event = {
-            seq: session.nextSeq++,
-            ts: Date.now(),
-            type: 'status',
-            payload: { status: 'ready', message: 'Starting sandbox container...' },
-          }
-          eventLog.append(id, sandboxStartEvent)
-          emitToSession(id, sandboxStartEvent)
-
-          try {
-            await ensureContainer(id, session.sandboxImage, workspaceRoot)
-            const sandboxReadyEvent: Event = {
-              seq: session.nextSeq++,
-              ts: Date.now(),
-              type: 'status',
-              payload: { status: 'ready', message: `Sandbox ready (${session.sandboxImage})` },
-            }
-            eventLog.append(id, sandboxReadyEvent)
-            emitToSession(id, sandboxReadyEvent)
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err)
-            const sandboxWarnEvent: Event = {
-              seq: session.nextSeq++,
-              ts: Date.now(),
-              type: 'status',
-              payload: { status: 'ready', message: `[warn] Sandbox unavailable: ${msg}. Bash tool will report errors per-call.` },
-            }
-            eventLog.append(id, sandboxWarnEvent)
-            emitToSession(id, sandboxWarnEvent)
-          }
-
-          sessionManager.updateSession(id, { nextSeq: session.nextSeq })
-        }
-
-        // ─── Auto-bootstrap the repository ─────────────────────────────
-        const bootstrapEvent: Event = {
-          seq: session.nextSeq++,
-          ts: Date.now(),
-          type: 'status',
-          payload: { status: 'working', message: 'Analyzing repository...' },
-        }
-        eventLog.append(id, bootstrapEvent)
-        emitToSession(id, bootstrapEvent)
-
-        try {
-          const bootstrapCtx = {
-            sessionId: id,
-            workspaceRoot: workspaceRoot!,
-            githubToken: session.githubToken,
-            sandboxImage: session.sandboxImage ?? undefined,
-            resolvePath: (inputPath: string) => {
-              if (!workspaceRoot) throw new Error('Workspace not ready')
-              const resolved = path.resolve(workspaceRoot, inputPath)
-              if (!resolved.startsWith(workspaceRoot)) {
-                throw new Error(`Path escapes workspace: ${inputPath}`)
-              }
-              return resolved
-            },
-          }
-
-          const gen = bootstrapRepoTool.call({}, bootstrapCtx)
-          let result = await gen.next()
-          while (!result.done) {
-            const progress = result.value
-            if (progress.type === 'progress') {
-              const progressEvent: Event = {
-                seq: session.nextSeq++,
-                ts: Date.now(),
-                type: 'tool_call_progress',
-                payload: {
-                  toolCallId: 'bootstrap-repo',
-                  toolName: 'bootstrap_repo',
-                  message: progress.message,
-                },
-              }
-              eventLog.append(id, progressEvent)
-              emitToSession(id, progressEvent)
-            }
-            result = await gen.next()
-          }
-          bootstrapResult = result.value
-          sessionManager.updateSession(id, { nextSeq: session.nextSeq })
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err)
-          const bootstrapErrorEvent: Event = {
-            seq: session.nextSeq++,
-            ts: Date.now(),
-            type: 'status',
-            payload: { status: 'ready', message: `[warn] Bootstrap issue: ${msg.slice(0, 100)}` },
-          }
-          eventLog.append(id, bootstrapErrorEvent)
-          emitToSession(id, bootstrapErrorEvent)
-          sessionManager.updateSession(id, { nextSeq: session.nextSeq })
-        }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        const errorEvent: Event = {
-          seq: session.nextSeq++,
-          ts: Date.now(),
-          type: 'status',
-          payload: { status: 'error', message: `Workspace setup failed: ${message}` },
-        }
-        eventLog.append(id, errorEvent)
-        emitToSession(id, errorEvent)
-        sessionManager.updateSession(id, { status: 'error', nextSeq: session.nextSeq })
-        return reply.status(500).send({ error: `Workspace setup failed: ${message}` })
-      }
+    // ─── Workspace setup: wait for the async setup kicked off at session creation ───
+    const setupPromise = workspaceSetupPromises.get(id)
+    if (!session.localPath && setupPromise) {
+      await setupPromise
     }
+
+    // Refresh session after setup completes
+    const updatedSession = sessionManager.getSession(id)
+    if (!updatedSession) {
+      return reply.status(404).send({ error: 'Session not found' })
+    }
+    const workspaceRoot = updatedSession.localPath
+    if (!workspaceRoot) {
+      return reply.status(500).send({ error: 'Workspace setup did not produce a local path' })
+    }
+    sessionManager.updateSession(id, { nextSeq: updatedSession.nextSeq })
+
+    // Use the bootstrap result computed during workspace setup
+    const bootstrapResult = bootstrapResults.get(id) ?? null
 
     // Create the LLM provider
     const apiKey = options.env?.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY
@@ -528,8 +376,8 @@ NOTE: Use the exact scripts listed above for THIS repository. Commands vary by p
 
     const systemPrompt = `You are Pocket, an autonomous coding agent.
 
-Repository: ${session.task}
-Branch: ${session.branchName ?? 'N/A'}${bootstrapInfo}
+Repository: ${updatedSession.task}
+Branch: ${updatedSession.branchName ?? 'N/A'}${bootstrapInfo}
 
 Use tools to explore and make changes as needed.
 
@@ -540,12 +388,12 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
       provider,
       eventLog,
       tools: registry,
-      model: session.model,
+      model: updatedSession.model,
       systemPrompt,
-      startingSeq: session.nextSeq,
+      startingSeq: updatedSession.nextSeq,
       workspaceRoot,
-      githubToken: session.githubToken,
-      sandboxImage: session.sandboxImage,
+      githubToken: updatedSession.githubToken,
+      sandboxImage: updatedSession.sandboxImage,
       permissionGate,
       onPermissionAlwaysAllow: (toolName) => {
         sessionManager.persistPermissionRule(id, toolName, 'allow')
@@ -680,6 +528,205 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
   setInterval(() => cleanupOldWorkspaces(options.sessionsDir), 24 * 60 * 60 * 1000)
 
   return app
+}
+
+async function runWorkspaceSetup(
+  session: import('@pocket/core').SessionMeta,
+  sessionManager: SessionManager,
+  eventLog: EventLog,
+  emitToSession: (sessionId: string, event: Event) => void,
+  options: BuildOptions,
+  bootstrapResults: Map<string, any>,
+): Promise<void> {
+  const id = session.id
+  const setupToolCallId = `workspace-setup-${Date.now()}`
+  const setupToolName = session.isLocal ? 'init_local_repo' : 'clone_repo'
+
+  // Emit tool_call_start
+  const startEvent: Event = {
+    seq: session.nextSeq++,
+    ts: Date.now(),
+    type: 'tool_call_start',
+    payload: {
+      toolCallId: setupToolCallId,
+      toolName: setupToolName,
+      args: { repoUrl: session.repoUrl, sessionId: id, isLocal: session.isLocal },
+    },
+  }
+  eventLog.append(id, startEvent)
+  emitToSession(id, startEvent)
+
+  // Emit status: cloning
+  const statusEvent: Event = {
+    seq: session.nextSeq++,
+    ts: Date.now(),
+    type: 'status',
+    payload: { status: 'cloning', message: 'Setting up workspace...' },
+  }
+  eventLog.append(id, statusEvent)
+  emitToSession(id, statusEvent)
+
+  let workspaceRoot: string
+
+  try {
+    if (session.isLocal) {
+      workspaceRoot = await initLocalRepo(id, (message) => {
+        const progressEvent: Event = {
+          seq: session.nextSeq++,
+          ts: Date.now(),
+          type: 'tool_call_progress',
+          payload: {
+            toolCallId: setupToolCallId,
+            toolName: setupToolName,
+            message,
+          },
+        }
+        eventLog.append(id, progressEvent)
+        emitToSession(id, progressEvent)
+      })
+    } else {
+      workspaceRoot = await cloneRepo(session.repoUrl, id, session.githubToken, (message) => {
+        const progressEvent: Event = {
+          seq: session.nextSeq++,
+          ts: Date.now(),
+          type: 'tool_call_progress',
+          payload: {
+            toolCallId: setupToolCallId,
+            toolName: setupToolName,
+            message,
+          },
+        }
+        eventLog.append(id, progressEvent)
+        emitToSession(id, progressEvent)
+      })
+    }
+
+    // Persist localPath and advance nextSeq
+    sessionManager.updateSession(id, {
+      localPath: workspaceRoot,
+      status: 'ready',
+      nextSeq: session.nextSeq,
+    })
+
+    // Emit status: ready
+    const readyEvent: Event = {
+      seq: session.nextSeq++,
+      ts: Date.now(),
+      type: 'status',
+      payload: { status: 'ready', message: 'Workspace ready' },
+    }
+    eventLog.append(id, readyEvent)
+    emitToSession(id, readyEvent)
+
+    // Eagerly initialize sandbox container (pull image, start container)
+    if (session.sandboxImage && isPodmanAvailable()) {
+      const sandboxStartEvent: Event = {
+        seq: session.nextSeq++,
+        ts: Date.now(),
+        type: 'status',
+        payload: { status: 'ready', message: 'Starting sandbox container...' },
+      }
+      eventLog.append(id, sandboxStartEvent)
+      emitToSession(id, sandboxStartEvent)
+
+      try {
+        await ensureContainer(id, session.sandboxImage, workspaceRoot)
+        const sandboxReadyEvent: Event = {
+          seq: session.nextSeq++,
+          ts: Date.now(),
+          type: 'status',
+          payload: { status: 'ready', message: `Sandbox ready (${session.sandboxImage})` },
+        }
+        eventLog.append(id, sandboxReadyEvent)
+        emitToSession(id, sandboxReadyEvent)
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        const sandboxWarnEvent: Event = {
+          seq: session.nextSeq++,
+          ts: Date.now(),
+          type: 'status',
+          payload: { status: 'ready', message: `[warn] Sandbox unavailable: ${msg}. Bash tool will report errors per-call.` },
+        }
+        eventLog.append(id, sandboxWarnEvent)
+        emitToSession(id, sandboxWarnEvent)
+      }
+
+      sessionManager.updateSession(id, { nextSeq: session.nextSeq })
+    }
+
+    // ─── Auto-bootstrap the repository ─────────────────────────────
+    const bootstrapEvent: Event = {
+      seq: session.nextSeq++,
+      ts: Date.now(),
+      type: 'status',
+      payload: { status: 'working', message: 'Analyzing repository...' },
+    }
+    eventLog.append(id, bootstrapEvent)
+    emitToSession(id, bootstrapEvent)
+
+    try {
+      const bootstrapCtx = {
+        sessionId: id,
+        workspaceRoot,
+        githubToken: session.githubToken,
+        sandboxImage: session.sandboxImage ?? undefined,
+        resolvePath: (inputPath: string) => {
+          if (!workspaceRoot) throw new Error('Workspace not ready')
+          const resolved = path.resolve(workspaceRoot, inputPath)
+          if (!resolved.startsWith(workspaceRoot)) {
+            throw new Error(`Path escapes workspace: ${inputPath}`)
+          }
+          return resolved
+        },
+      }
+
+      const gen = bootstrapRepoTool.call({}, bootstrapCtx)
+      let result = await gen.next()
+      while (!result.done) {
+        const progress = result.value
+        if (progress.type === 'progress') {
+          const progressEvent: Event = {
+            seq: session.nextSeq++,
+            ts: Date.now(),
+            type: 'tool_call_progress',
+            payload: {
+              toolCallId: 'bootstrap-repo',
+              toolName: 'bootstrap_repo',
+              message: progress.message,
+            },
+          }
+          eventLog.append(id, progressEvent)
+          emitToSession(id, progressEvent)
+        }
+        result = await gen.next()
+      }
+      const bootstrapResult = result.value
+      bootstrapResults.set(id, bootstrapResult)
+      sessionManager.updateSession(id, { nextSeq: session.nextSeq })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const bootstrapErrorEvent: Event = {
+        seq: session.nextSeq++,
+        ts: Date.now(),
+        type: 'status',
+        payload: { status: 'ready', message: `[warn] Bootstrap issue: ${msg.slice(0, 100)}` },
+      }
+      eventLog.append(id, bootstrapErrorEvent)
+      emitToSession(id, bootstrapErrorEvent)
+      sessionManager.updateSession(id, { nextSeq: session.nextSeq })
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err)
+    const errorEvent: Event = {
+      seq: session.nextSeq++,
+      ts: Date.now(),
+      type: 'status',
+      payload: { status: 'error', message: `Workspace setup failed: ${message}` },
+    }
+    eventLog.append(id, errorEvent)
+    emitToSession(id, errorEvent)
+    sessionManager.updateSession(id, { status: 'error', nextSeq: session.nextSeq })
+  }
 }
 
 function cleanupOldWorkspaces(sessionsDir: string): void {
