@@ -33,6 +33,12 @@ export interface PendingPermission {
   status: 'pending' | 'approved' | 'denied'
 }
 
+export interface TokenUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+}
+
 export interface ChatState {
   messages: ChatMessage[]
   pendingPermissions: PendingPermission[]
@@ -40,6 +46,7 @@ export interface ChatState {
   isThinking: boolean
   error: string | null
   lastSeq: number
+  tokenUsage: TokenUsage | null
 }
 
 function makeId(): string {
@@ -77,6 +84,7 @@ export function reduceEvents(events: Event[]): ChatState {
     isThinking: false,
     error: null,
     lastSeq: 0,
+    tokenUsage: null,
   }
 
   let currentAssistantContent = ''
@@ -196,6 +204,14 @@ export function reduceEvents(events: Event[]): ChatState {
         }
         break
       }
+
+      case 'token_usage':
+        state.tokenUsage = {
+          promptTokens: Number(event.payload.promptTokens ?? 0),
+          completionTokens: Number(event.payload.completionTokens ?? 0),
+          totalTokens: Number(event.payload.totalTokens ?? 0),
+        }
+        break
 
       case 'status': {
         const status = String(event.payload.status ?? '')
