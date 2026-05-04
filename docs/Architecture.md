@@ -487,7 +487,7 @@ Bash commands (foreground) optionally run inside persistent Podman containers in
 #### How it works
 
 ```
-Session created with sandboxImage: "nikolaik/python-nodejs:python3.12-nodejs22"
+Session created with sandboxImage: "docker.io/nikolaik/python-nodejs:python3.12-nodejs22"
   │
   ▼
 Workspace setup starts immediately: clone repo
@@ -527,7 +527,7 @@ Session deleted / server shutdown → container cleaned up
 ```json
 // ~/.pocket/config.json
 {
-  "defaultSandboxImage": "nikolaik/python-nodejs:python3.12-nodejs22"   // applied to all sessions
+  "defaultSandboxImage": "docker.io/nikolaik/python-nodejs:python3.12-nodejs22"   // applied to all sessions
 }
 ```
 
@@ -547,7 +547,7 @@ POST /api/sessions
 
 | Image | Size | Has |
 |---|---|---|
-| `nikolaik/python-nodejs:python3.12-nodejs22` (default) | ~200MB | Node 22 + Python 3.12, npm, npx, pip |
+| `docker.io/nikolaik/python-nodejs:python3.12-nodejs22` (default) | ~200MB | Node 22 + Python 3.12, npm, npx, pip |
 | `node:22-alpine` | ~48MB | Node 22, npm, npx |
 | `python:3.12-slim` | ~55MB | Python 3.12, pip |
 | `rust:1-alpine` | ~100MB | Rust, cargo |
@@ -567,7 +567,7 @@ Any Podman-compatible OCI image works. The image is pulled on first use (on dema
 | `packages/tools/src/bash.ts` | Routes through `ensureContainer` + `execInContainer` when `ctx.sandboxImage` is set |
 | `packages/agent/src/process-manager.ts` | `spawn()` accepts optional `sandboxImage` — uses ephemeral `--rm` for background processes |
 | `packages/tools/src/background.ts` | Passes `ctx.sandboxImage` to `ProcessManager.spawn()` (kept ephemeral) |
-| `packages/agent/src/agent-runner.ts` | Stores `sandboxImage`, passes to `ToolContext`, includes in system prompt (`Sandbox: nikolaik/python-nodejs:python3.12-nodejs22`) |
+| `packages/agent/src/agent-runner.ts` | Stores `sandboxImage`, passes to `ToolContext`, includes in system prompt (`Sandbox: docker.io/nikolaik/python-nodejs:python3.12-nodejs22`) |
 | `packages/agent/src/session-manager.ts` | Stores `sandboxImage` in session metadata, defaults from config; calls `stopSandboxContainer` on `deleteSession` |
 | `apps/server/src/index.ts` | Accepts `sandboxImage` on `POST /api/sessions`, podman check at startup, triggers **workspace setup** (clone, eager sandbox init, bootstrap) immediately on session creation, `killAllContainers` on shutdown |
 | `packages/core/src/index.ts` | `sandboxImage` field on `ToolContext`, `SessionMeta`, `PocketConfig` |
@@ -873,7 +873,7 @@ Each milestone was independently shippable and testable.
 - `ensureContainer()` + `execInContainer()` replacing ephemeral `runInSandbox` for foreground bash
 - Workspace setup (clone, eager sandbox init, bootstrap) on session creation, before first user message
 - 30-minute idle timeout with auto-removal
-- Default image: `nikolaik/python-nodejs:python3.12-nodejs22`
+- Default image: `docker.io/nikolaik/python-nodejs:python3.12-nodejs22`
 - Background processes remain ephemeral (`--rm` per process)
 - Session-scoped cleanup on delete, server shutdown via `killAllContainers()`
 - Error events emitted to session on container failure (no silent fallback)
@@ -902,7 +902,7 @@ Resolved during implementation:
 4. **HTTP framework** — Fastify (not Express). Chosen for better SSE support and performance.
 5. **Monorepo tool** — pnpm workspaces (not Nx). Simpler, fewer dependencies, already working.
 6. **Message reconstruction from event log** — `buildMessages()` groups tool calls per `assistant_text_done` boundary so multi-turn sessions maintain correct LLM context. Earlier v1 lumped all tool calls onto the last assistant message, which corrupted history and caused loop stalls on flash models.
-7. **Sandbox isolation** — foreground bash commands run in persistent Podman containers. `packages/tools/src/sandbox.ts` provides `ensureContainer()` (starts via `podman run -d --name pocket-{sessionId}`), `execInContainer()` (via `podman exec`), and `stopSandboxContainer()` for cleanup. 30-minute idle timeout. Default image: `nikolaik/python-nodejs:python3.12-nodejs22` (via `DEFAULT_SANDBOX_IMAGE` constant). Background processes use ephemeral `--rm` containers. When sandbox is active, all bash commands auto-allow (except `DEFAULT_BASH_DENY` patterns) — the container handles isolation, not the permission gate. `sandboxImage` is validated at every entry point (config, API, session creation) to prevent bypass via null/empty string.
+7. **Sandbox isolation** — foreground bash commands run in persistent Podman containers. `packages/tools/src/sandbox.ts` provides `ensureContainer()` (starts via `podman run -d --name pocket-{sessionId}`), `execInContainer()` (via `podman exec`), and `stopSandboxContainer()` for cleanup. 30-minute idle timeout. Default image: `docker.io/nikolaik/python-nodejs:python3.12-nodejs22` (via `DEFAULT_SANDBOX_IMAGE` constant). Background processes use ephemeral `--rm` containers. When sandbox is active, all bash commands auto-allow (except `DEFAULT_BASH_DENY` patterns) — the container handles isolation, not the permission gate. `sandboxImage` is validated at every entry point (config, API, session creation) to prevent bypass via null/empty string.
 
 8. **Auto-bootstrap on clone** — after workspace is ready (cloned + sandbox started), `bootstrap_repo` tool automatically runs. It detects project type (node/python/rust/go), package manager (npm/pnpm/yarn/pip/cargo), scripts from package.json, config files (Vite, React, Next.js, Express, FastAPI, Django), and suggested dev server ports. It runs dependency install in the sandbox. Results are included in the agent's system prompt so the agent knows the exact commands for this repo instead of guessing.
 

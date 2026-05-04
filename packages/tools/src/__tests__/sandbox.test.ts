@@ -85,6 +85,54 @@ describe('sandbox module', () => {
     })
   })
 
+  describe('normalizeImage', () => {
+    it('adds docker.io prefix to simple image names', async () => {
+      const { normalizeImage } = await import('../sandbox.js')
+      expect(normalizeImage('nikolaik/python-nodejs:python3.12-nodejs22'))
+        .toBe('docker.io/nikolaik/python-nodejs:python3.12-nodejs22')
+    })
+
+    it('does not modify images already with a registry', async () => {
+      const { normalizeImage } = await import('../sandbox.js')
+      expect(normalizeImage('docker.io/ubuntu:22.04')).toBe('docker.io/ubuntu:22.04')
+      expect(normalizeImage('ghcr.io/owner/repo:tag')).toBe('ghcr.io/owner/repo:tag')
+      expect(normalizeImage('quay.io/org/image:tag')).toBe('quay.io/org/image:tag')
+    })
+
+    it('does not modify images with port in registry', async () => {
+      const { normalizeImage } = await import('../sandbox.js')
+      expect(normalizeImage('localhost:5000/myimage:tag')).toBe('localhost:5000/myimage:tag')
+    })
+
+    it('handles official short names (single name)', async () => {
+      const { normalizeImage } = await import('../sandbox.js')
+      expect(normalizeImage('ubuntu:22.04')).toBe('docker.io/ubuntu:22.04')
+      expect(normalizeImage('node:20')).toBe('docker.io/node:20')
+    })
+
+    it('handles images with org but no registry', async () => {
+      const { normalizeImage } = await import('../sandbox.js')
+      expect(normalizeImage('library/ubuntu:22.04')).toBe('docker.io/library/ubuntu:22.04')
+    })
+
+    it('handles images without tag', async () => {
+      const { normalizeImage } = await import('../sandbox.js')
+      expect(normalizeImage('nikolaik/python-nodejs')).toBe('docker.io/nikolaik/python-nodejs')
+    })
+
+    it('handles images with digest', async () => {
+      const { normalizeImage } = await import('../sandbox.js')
+      const digest = 'nikolaik/python-nodejs@sha256:abc123'
+      expect(normalizeImage(digest)).toBe('docker.io/' + digest)
+    })
+
+    it('handles custom domain-style registries', async () => {
+      const { normalizeImage } = await import('../sandbox.js')
+      expect(normalizeImage('myregistry.example.com/image:tag')).toBe('myregistry.example.com/image:tag')
+      expect(normalizeImage('registry.example.com:5000/image:tag')).toBe('registry.example.com:5000/image:tag')
+    })
+  })
+
   describe('spawnInSandbox', () => {
     it('is a function', async () => {
       const { spawnInSandbox } = await import('../sandbox.js')

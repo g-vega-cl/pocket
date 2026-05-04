@@ -70,7 +70,7 @@ Session ends → container cleaned up
 
 **Requirements:** Podman (pre-installed on Fedora, `brew install podman` on macOS).
 
-**Default image:** `nikolaik/python-nodejs:python3.12-nodejs22` (hardcoded via `DEFAULT_SANDBOX_IMAGE`). Override per session or globally:
+**Default image:** `docker.io/nikolaik/python-nodejs:python3.12-nodejs22` (hardcoded via `DEFAULT_SANDBOX_IMAGE`). Override per session or globally:
 
 ```json
 // ~/.pocket/config.json
@@ -83,7 +83,7 @@ POST /api/sessions
 { "sandboxImage": "rust:1-alpine" }
 ```
 
-Common images: `node:22-alpine`, `python:3.12-slim`, `rust:1-alpine`, `nikolaik/python-nodejs:python3.12-nodejs22` (default, JS + Python).
+Common images: `node:22-alpine`, `python:3.12-slim`, `rust:1-alpine`, `docker.io/nikolaik/python-nodejs:python3.12-nodejs22` (default, JS + Python).
 
 **Sandbox enforcement:** The sandbox image is validated at every entry point (config file, session API, session manager). Null values, empty strings, and missing config all fall through to the hardcoded default — there is no way to accidentally bypass sandbox.
 

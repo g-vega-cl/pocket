@@ -113,7 +113,7 @@ describe('core types', () => {
   })
 
   it('should export default sandbox image', () => {
-    expect(DEFAULT_SANDBOX_IMAGE).toBe('nikolaik/python-nodejs:python3.12-nodejs22')
+    expect(DEFAULT_SANDBOX_IMAGE).toBe('docker.io/nikolaik/python-nodejs:python3.12-nodejs22')
     expect(typeof DEFAULT_SANDBOX_IMAGE).toBe('string')
     expect(DEFAULT_SANDBOX_IMAGE.length).toBeGreaterThan(0)
   })

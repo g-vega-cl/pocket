@@ -176,7 +176,7 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
 
 export const DEFAULT_PROTECTED_BRANCHES = ['main', 'master', 'develop', 'pocket', 'staging', 'production']
 
-export const DEFAULT_SANDBOX_IMAGE = 'nikolaik/python-nodejs:python3.12-nodejs22'
+export const DEFAULT_SANDBOX_IMAGE = 'docker.io/nikolaik/python-nodejs:python3.12-nodejs22'
 
 export const DEFAULT_BASH_DENY = [
   ':\\(\\)\\{ :\\|:& \\};:',  // fork bomb

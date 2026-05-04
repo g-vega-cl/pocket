@@ -19,6 +19,18 @@ export function isPodmanAvailable(): boolean {
   return podmanAvailable
 }
 
+export function normalizeImage(image: string): string {
+  const firstSlash = image.indexOf('/')
+  if (firstSlash === -1) {
+    return `docker.io/${image}`
+  }
+  const firstSegment = image.slice(0, firstSlash)
+  if (firstSegment.includes('.') || firstSegment.includes(':')) {
+    return image
+  }
+  return `docker.io/${image}`
+}
+
 function shellEscape(arg: string): string {
   return `'${arg.replace(/'/g, "'\\''")}'`
 }
@@ -59,6 +71,8 @@ export async function ensureContainer(
   if (!isPodmanAvailable()) {
     throw new Error('Podman is not available. Install podman or disable sandbox in config.')
   }
+
+  image = normalizeImage(image)
 
   const name = containerName(sessionId)
   const existing = activeContainers.get(sessionId)
@@ -238,6 +252,8 @@ export async function runInSandbox(
     throw new Error('Podman is not available. Install podman or disable sandbox in config.')
   }
 
+  options.image = normalizeImage(options.image)
+
   const podmanArgs = [
     'run', '--rm',
     '-v', `${options.workspaceRoot}:/work:Z`,
@@ -291,6 +307,8 @@ export function spawnInSandbox(
   if (!isPodmanAvailable()) {
     throw new Error('Podman is not available. Install podman or disable sandbox in config.')
   }
+
+  options.image = normalizeImage(options.image)
 
   const args = [
     'run', '--rm',
