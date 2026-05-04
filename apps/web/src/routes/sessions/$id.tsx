@@ -125,6 +125,14 @@ function SessionChatView() {
 
   const [input, setInput] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  function autoResizeTextarea() {
+    const el = textareaRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+  }
 
   useEffect(() => {
     loadSession(id)
@@ -138,6 +146,9 @@ function SessionChatView() {
     e.preventDefault()
     if (!input.trim()) return
     setInput('')
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto'
+    }
     await sendMessage(input.trim())
   }
 
@@ -230,13 +241,25 @@ function SessionChatView() {
 
       {/* Composer */}
       <form onSubmit={handleSend} className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex gap-2 flex-shrink-0">
-        <input
-          type="text"
+        <textarea
+          ref={textareaRef}
           value={input}
-          onChange={e => setInput(e.target.value)}
+          onChange={e => {
+            setInput(e.target.value)
+            autoResizeTextarea()
+          }}
+          onKeyDown={e => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              if (input.trim()) {
+                handleSend(e)
+              }
+            }
+          }}
           placeholder={isThinking ? 'Agent is thinking...' : 'Send a message...'}
           disabled={isThinking}
-          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none disabled:opacity-50"
+          rows={1}
+          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto"
         />
         {isThinking ? (
           <button
