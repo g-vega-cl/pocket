@@ -65,8 +65,8 @@ describe('Workspace initialization', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('should clone repo and update session.localPath on first message', async () => {
-    // Create session
+  it('should clone repo and update session.localPath on session creation', async () => {
+    // Create session — workspace setup starts immediately
     const create = await app.inject({
       method: 'POST',
       url: '/api/sessions',
@@ -75,16 +75,8 @@ describe('Workspace initialization', () => {
     expect(create.statusCode).toBe(200)
     const { id } = JSON.parse(create.payload)
 
-    // Send message — this triggers workspace setup
-    const msg = await app.inject({
-      method: 'POST',
-      url: `/api/sessions/${id}/messages`,
-      payload: { content: 'hello' },
-    })
-    expect(msg.statusCode).toBe(200)
-
-    // Give async runner a tick to update
-    await new Promise(r => setTimeout(r, 100))
+    // Wait for async workspace setup to complete
+    await new Promise(r => setTimeout(r, 200))
 
     // Verify clone was called with correct args
     expect(cloneCalls).toHaveLength(1)
@@ -106,14 +98,8 @@ describe('Workspace initialization', () => {
     })
     const { id } = JSON.parse(create.payload)
 
-    const msg = await app.inject({
-      method: 'POST',
-      url: `/api/sessions/${id}/messages`,
-      payload: { content: 'hello' },
-    })
-    expect(msg.statusCode).toBe(200)
-
-    await new Promise(r => setTimeout(r, 100))
+    // Wait for async workspace setup to complete
+    await new Promise(r => setTimeout(r, 200))
 
     const get = await app.inject({ method: 'GET', url: `/api/sessions/${id}` })
     const session = JSON.parse(get.payload)
@@ -129,6 +115,9 @@ describe('Workspace initialization', () => {
     })
     const { id } = JSON.parse(create.payload)
 
+    // Wait for async workspace setup to complete
+    await new Promise(r => setTimeout(r, 200))
+
     // First message
     await app.inject({ method: 'POST', url: `/api/sessions/${id}/messages`, payload: { content: 'hello 1' } })
     await new Promise(r => setTimeout(r, 100))
@@ -137,7 +126,7 @@ describe('Workspace initialization', () => {
     await app.inject({ method: 'POST', url: `/api/sessions/${id}/messages`, payload: { content: 'hello 2' } })
     await new Promise(r => setTimeout(r, 100))
 
-    // Should only clone once
+    // Should only clone once (at session creation)
     expect(cloneCalls).toHaveLength(1)
   })
 
@@ -149,8 +138,8 @@ describe('Workspace initialization', () => {
     })
     const { id } = JSON.parse(create.payload)
 
-    await app.inject({ method: 'POST', url: `/api/sessions/${id}/messages`, payload: { content: 'hello' } })
-    await new Promise(r => setTimeout(r, 100))
+    // Wait for async workspace setup to complete (events are written during setup)
+    await new Promise(r => setTimeout(r, 200))
 
     // Read events.jsonl directly
     const eventsPath = path.join(tmpDir, id, 'events.jsonl')
