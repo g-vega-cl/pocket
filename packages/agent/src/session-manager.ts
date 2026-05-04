@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import type { SessionMeta, SessionStatus, PocketConfig, PermissionLevel } from '@pocket/core'
-import { DEFAULT_PROTECTED_BRANCHES } from '@pocket/core'
+import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY } from '@pocket/core'
 import type { EventLog } from './event-log.js'
 import type { AgentRunner } from './agent-runner.js'
 import type { PermissionGate } from './permission-gate.js'
@@ -53,6 +53,10 @@ export class SessionManager {
 
     const config = this.getConfig()
 
+    const sandboxImage = input.sandboxImage && typeof input.sandboxImage === 'string' && input.sandboxImage.trim()
+      ? input.sandboxImage
+      : config.defaultSandboxImage
+
     const meta: SessionMeta = {
       id,
       repoUrl: input.repoUrl,
@@ -66,7 +70,7 @@ export class SessionManager {
       nextSeq: 1,
       isLocal: input.isLocal ?? false,
       githubToken: input.githubToken,
-      sandboxImage: input.sandboxImage ?? config.defaultSandboxImage,
+      sandboxImage,
     }
 
     this.sessions.set(id, meta)
@@ -167,13 +171,17 @@ export class SessionManager {
     } catch {
       // use defaults
     }
+    const defaultSandboxImage = config.defaultSandboxImage && typeof config.defaultSandboxImage === 'string' && config.defaultSandboxImage.trim()
+      ? config.defaultSandboxImage
+      : DEFAULT_SANDBOX_IMAGE
+
     return {
       bashAllow: config.bashAllow ?? [],
-      bashDeny: config.bashDeny ?? [],
+      bashDeny: config.bashDeny ?? DEFAULT_BASH_DENY,
       protectedBranches: config.protectedBranches ?? DEFAULT_PROTECTED_BRANCHES,
       processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
       maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
-      defaultSandboxImage: config.defaultSandboxImage ?? 'node:22-alpine',
+      defaultSandboxImage,
     }
   }
 

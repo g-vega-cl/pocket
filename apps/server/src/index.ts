@@ -29,7 +29,7 @@ import {
   ensureContainer,
 } from '@pocket/tools'
 import type { Event, PocketConfig } from '@pocket/core'
-import { DEFAULT_PROTECTED_BRANCHES } from '@pocket/core'
+import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY } from '@pocket/core'
 
 function getConfig(): PocketConfig {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '~'
@@ -42,13 +42,17 @@ function getConfig(): PocketConfig {
   } catch {
     // use defaults
   }
+  const defaultSandboxImage = config.defaultSandboxImage && typeof config.defaultSandboxImage === 'string' && config.defaultSandboxImage.trim()
+    ? config.defaultSandboxImage
+    : DEFAULT_SANDBOX_IMAGE
+
   return {
     bashAllow: config.bashAllow ?? [],
-    bashDeny: config.bashDeny ?? [],
+    bashDeny: config.bashDeny ?? DEFAULT_BASH_DENY,
     protectedBranches: config.protectedBranches ?? DEFAULT_PROTECTED_BRANCHES,
     processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
     maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
-    defaultSandboxImage: config.defaultSandboxImage ?? 'nikolaik/python-nodejs:python3.12-nodejs22',
+    defaultSandboxImage,
   }
 }
 
@@ -163,13 +167,17 @@ export async function buildApp(options: BuildOptions) {
       return reply.status(400).send({ error: 'repoUrl, task, and model are required' })
     }
 
+    const sandboxImage = body.sandboxImage && typeof body.sandboxImage === 'string' && body.sandboxImage.trim()
+      ? body.sandboxImage
+      : undefined
+
     const session = sessionManager.createSession({
       repoUrl: body.repoUrl,
       task: body.task,
       model: body.model,
       githubToken: body.githubToken || (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN),
       isLocal: body.isLocal ?? false,
-      sandboxImage: body.sandboxImage,
+      sandboxImage,
     })
 
     const resp = {

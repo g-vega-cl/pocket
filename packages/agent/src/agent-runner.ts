@@ -466,7 +466,7 @@ export class AgentRunner {
 
       if (tc.function.name === 'bash') {
         const command = (args.command as string) ?? ''
-        permResult = this.permissionGate.checkBashCommand(command, this.sessionId)
+        permResult = this.permissionGate.checkBashCommand(command, this.sessionId, this.sandboxImage)
       } else {
         permResult = this.permissionGate.checkPermission({
           tool,

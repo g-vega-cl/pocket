@@ -54,9 +54,14 @@ Point your tunnel to `http://localhost:3000`. SSE heartbeats every 15s keep the 
 
 Bash commands run in persistent Podman containers per session instead of directly on the host. Each session gets one container that stays alive for the session lifetime — tool caches (npm packages, pip, cargo) survive between commands.
 
+### Command permissions in sandbox
+
+When sandbox is active (always, by default), **all bash commands are auto-allowed**. The container handles isolation — only the deny list (`bashDeny`) blocks commands. Fork bombs, `rm -rf /`, and `sudo` are denied by default. The agent has full autonomy inside the container.
+
 ```
 Session starts → container starts (eager init, before agent loop)
 Agent calls bash({ command: "tsc --noEmit" })
+  → Permission gate: sandbox active → ALLOW (skip allow-list check)
   → podman exec pocket-{sessionId} sh -c "tsc --noEmit"
 Agent calls bash again → same container, tools cached → instant
 30 min idle → container auto-removed
@@ -65,7 +70,7 @@ Session ends → container cleaned up
 
 **Requirements:** Podman (pre-installed on Fedora, `brew install podman` on macOS).
 
-**Default image:** `nikolaik/python-nodejs:python3.12-nodejs22`. Override per session or globally:
+**Default image:** `nikolaik/python-nodejs:python3.12-nodejs22` (hardcoded via `DEFAULT_SANDBOX_IMAGE`). Override per session or globally:
 
 ```json
 // ~/.pocket/config.json
@@ -80,6 +85,8 @@ POST /api/sessions
 
 Common images: `node:22-alpine`, `python:3.12-slim`, `rust:1-alpine`, `nikolaik/python-nodejs:python3.12-nodejs22` (default, JS + Python).
 
+**Sandbox enforcement:** The sandbox image is validated at every entry point (config file, session API, session manager). Null values, empty strings, and missing config all fall through to the hardcoded default — there is no way to accidentally bypass sandbox.
+
 If Podman isn't installed, container init emits a warning but does not block — bash commands return errors per-call so the agent and user see them.
 
 **Background processes** (`bash_background`) still use ephemeral containers (`podman run --rm`) — one per process, destroyed on exit.
@@ -87,14 +94,14 @@ If Podman isn't installed, container init emits a warning but does not block —
 ## Test
 
 ```bash
-pnpm -r test              # All 203 tests across 6 packages
+pnpm -r test              # All 229 tests across 6 packages
 # or individually:
-pnpm --filter @pocket/agent test      # 80 tests
-pnpm --filter @pocket/tools test      # 68 tests
+pnpm --filter @pocket/agent test      # 85 tests
+pnpm --filter @pocket/tools test      # 84 tests
 pnpm --filter web test                # 22 tests
 pnpm --filter @pocket/server test     # 13 tests
 pnpm --filter @pocket/core test       #  9 tests
-pnpm --filter @pocket/llm test        # 11 tests
+pnpm --filter @pocket/llm test        # 16 tests
 ```
 
 ## Use
@@ -133,29 +140,29 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 ## Tool inventory (v1)
 
-| Tool                                  | Read-only | Default      | Notes                               |
-| ------------------------------------- | --------- | ------------ | ----------------------------------- |
-| `read_file`                           | ✓         | allow        | Path bound to workspace             |
-| `list_files`                          | ✓         | allow        | Extension filter                    |
-| `grep`                                | ✓         | allow        | ripgrep fallback                    |
-| `glob`                                | ✓         | allow        | File pattern matching               |
-| `web_fetch`                           | ✓         | allow        | Capped at 100KB                     |
-| `web_search`                          | ✓         | allow        | OpenRouter-powered                  |
-| `git_status` / `git_log` / `git_diff` | ✓         | allow        | Read-only git                       |
-| `write_file`                          | ✗         | conditional  | Allow in workspace, ask outside     |
-| `edit_file`                           | ✗         | conditional  | String-replace, enforces uniqueness |
-| `git_create_branch`                   | ✗         | allow        | `pocket/{timestamp}-{slug}`         |
-| `git_commit`                          | ✗         | allow        | Stages all changes                  |
-| `git_push`                            | ✗         | conditional  | Protected branch check              |
-| `github_create_pr`                    | ✗         | allow        | PR to `main` base branch            |
+| Tool                                  | Read-only | Default      | Notes                                           |
+| ------------------------------------- | --------- | ------------ | ----------------------------------------------- |
+| `read_file`                           | ✓         | allow        | Path bound to workspace                         |
+| `list_files`                          | ✓         | allow        | Extension filter                                |
+| `grep`                                | ✓         | allow        | ripgrep fallback                                |
+| `glob`                                | ✓         | allow        | File pattern matching                           |
+| `web_fetch`                           | ✓         | allow        | Capped at 100KB                                 |
+| `web_search`                          | ✓         | allow        | OpenRouter-powered                              |
+| `git_status` / `git_log` / `git_diff` | ✓         | allow        | Read-only git                                   |
+| `write_file`                          | ✗         | conditional  | Allow in workspace, ask outside                 |
+| `edit_file`                           | ✗         | conditional  | String-replace, enforces uniqueness             |
+| `git_create_branch`                   | ✗         | allow        | `pocket/{timestamp}-{slug}`                     |
+| `git_commit`                          | ✗         | allow        | Stages all changes                              |
+| `git_push`                            | ✗         | conditional  | Protected branch check                          |
+| `github_create_pr`                    | ✗         | allow        | PR to `main` base branch                        |
 | `bash`                                | ✗         | rule-matched | Regex gate, 5-min timeout, sandboxed via Podman |
-| `bash_background`                     | ✗         | rule-matched | Spawn daemon process, sandboxed via Podman |
-| `bash_read_output`                    | ✓         | allow        | since_last_read / tail / all        |
-| `bash_send_input`                     | ✗         | ask          | Write to process stdin              |
-| `bash_kill`                           | ✗         | allow        | SIGTERM → SIGKILL                   |
-| `list_processes`                      | ✓         | allow        | List background processes           |
-| `plan`                                | ✗         | allow        | Agent scratchpad                    |
-| `todos_write`                         | ✗         | allow        | Task tracking                       |
+| `bash_background`                     | ✗         | rule-matched | Spawn daemon process, sandboxed via Podman      |
+| `bash_read_output`                    | ✓         | allow        | since_last_read / tail / all                    |
+| `bash_send_input`                     | ✗         | ask          | Write to process stdin                          |
+| `bash_kill`                           | ✗         | allow        | SIGTERM → SIGKILL                               |
+| `list_processes`                      | ✓         | allow        | List background processes                       |
+| `plan`                                | ✗         | allow        | Agent scratchpad                                |
+| `todos_write`                         | ✗         | allow        | Task tracking                                   |
 
 ## TODO - ROADMAP
 
@@ -164,3 +171,10 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 - [ ] add wrap in my input chat so I can see three lines of text. we can make it scrollable, is this a good practice?
 - [ ] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.
 - [ ] Take inspiration from Bolt.diy and https://github.com/Gitlawb/openclaude
+- [ ] Pocket: after thinking block is finished, hide it automatically and add a little collapsible to show it back if the user wants
+- [ ] Pocket: confirm containerized and be more aggressive with allowing commands inside container
+- [ ] Pocket: make sure agent doesn't get stuck in places like "now let me update XYZ. And it never updates it until I type "proceed". Maybe a super cheap or local LLM proving/checking the latest status
+- [ ] Pocket: allow local models and local model calculator and ranking based on ollama models?
+- [ ] Pocket add context length? And maybe a compress?
+- [ ] Pocket: Change to backup model mid convo? Could probing LLM do this for you? Audit response beforehand?
+- [ ] Pocket: check why babbling? Check what we are sending log before babbling starts? Check editing and going back one message to prevent babbling? - This should be automatic. I'm thinking of the probing llm being a "gamemaster"

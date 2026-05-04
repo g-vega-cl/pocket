@@ -103,4 +103,19 @@ describe('PermissionGate', () => {
     })
     expect(result.resolution).toBe('ask')
   })
+
+  it('should auto-allow any bash command when sandboxImage is set', () => {
+    const result = gate.checkBashCommand('npm install', 'sess_1', 'node:22-alpine')
+    expect(result.resolution).toBe('allow')
+  })
+
+  it('should deny blacklisted bash commands even with sandboxImage set', () => {
+    gate = new PermissionGate({
+      bashAllow: [],
+      bashDeny: ['^sudo '],
+      protectedBranches: ['main'],
+    })
+    const result = gate.checkBashCommand('sudo rm -rf /', 'sess_1', 'node:22-alpine')
+    expect(result.resolution).toBe('deny')
+  })
 })

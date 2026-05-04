@@ -161,6 +161,14 @@ export interface PocketConfig {
 
 export const DEFAULT_PROTECTED_BRANCHES = ['main', 'master', 'develop', 'pocket', 'staging', 'production']
 
+export const DEFAULT_SANDBOX_IMAGE = 'nikolaik/python-nodejs:python3.12-nodejs22'
+
+export const DEFAULT_BASH_DENY = [
+  ':\\(\\)\\{ :\\|:& \\};:',  // fork bomb
+  '^rm -rf /',                 // delete root
+  '^sudo ',                    // privilege escalation
+]
+
 // ─── LLM Provider (§10) ────────────────────────────────────
 
 export interface LLMChunk {

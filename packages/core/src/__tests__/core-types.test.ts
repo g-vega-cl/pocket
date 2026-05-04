@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
-import { DEFAULT_PROTECTED_BRANCHES } from '../index.js'
+import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY } from '../index.js'
 import type {
   Event,
   EventType,
@@ -110,6 +110,19 @@ describe('core types', () => {
   it('should export default protected branches', () => {
     expect(DEFAULT_PROTECTED_BRANCHES).toContain('main')
     expect(DEFAULT_PROTECTED_BRANCHES).toContain('master')
+  })
+
+  it('should export default sandbox image', () => {
+    expect(DEFAULT_SANDBOX_IMAGE).toBe('nikolaik/python-nodejs:python3.12-nodejs22')
+    expect(typeof DEFAULT_SANDBOX_IMAGE).toBe('string')
+    expect(DEFAULT_SANDBOX_IMAGE.length).toBeGreaterThan(0)
+  })
+
+  it('should export default bash deny patterns', () => {
+    expect(Array.isArray(DEFAULT_BASH_DENY)).toBe(true)
+    expect(DEFAULT_BASH_DENY.length).toBeGreaterThan(0)
+    expect(DEFAULT_BASH_DENY.some(p => /rm -rf/.test(p))).toBe(true)
+    expect(DEFAULT_BASH_DENY.some(p => /sudo/.test(p))).toBe(true)
   })
 
   it('should allow constructing BackgroundProcess', () => {
