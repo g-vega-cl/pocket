@@ -176,6 +176,18 @@ export class AgentRunner {
 
         usageResult = streamResult.value
 
+        // Emit token usage if available
+        if (usageResult && typeof usageResult === 'object' && 'totalTokens' in usageResult) {
+          this.emit({
+            type: 'token_usage',
+            payload: {
+              promptTokens: (usageResult as any).promptTokens ?? 0,
+              completionTokens: (usageResult as any).completionTokens ?? 0,
+              totalTokens: (usageResult as any).totalTokens ?? 0,
+            },
+          })
+        }
+
         // Emit assistant text done
         this.emit({
           type: 'assistant_text_done',

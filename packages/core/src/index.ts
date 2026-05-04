@@ -12,6 +12,7 @@ export type EventType =
   | 'permission_requested'
   | 'permission_resolved'
   | 'status'
+  | 'token_usage'
   | 'compact_marker'
 
 export interface Event<T extends EventType = EventType> {
@@ -31,6 +32,7 @@ export interface EventPayloadMap {
   permission_requested: { permissionId: string; toolName: string; toolCallId: string; args: Record<string, unknown>; reason: string }
   permission_resolved: { permissionId: string; toolName: string; resolution: 'allow' | 'deny'; alwaysAllow?: boolean }
   status: { status: SessionStatus; message?: string }
+  token_usage: { promptTokens: number; completionTokens: number; totalTokens: number }
   compact_marker: { boundary: string }
 }
 
