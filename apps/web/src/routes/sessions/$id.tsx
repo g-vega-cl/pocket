@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { usePocketSession } from '#/hooks/usePocketSession.js'
+import { ThinkingDrawer } from '#/components/ThinkingDrawer.js'
 import type { PendingPermission } from '#/state/events.js'
 
 export const Route = createFileRoute('/sessions/$id')({
@@ -189,25 +190,26 @@ function SessionChatView() {
           </div>
         )}
 
-        {messages.map((msg, i) => (
-          <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-            <div className={`max-w-[80%] rounded-xl px-4 py-2 text-sm ${
-              msg.role === 'user'
-                ? 'bg-[#4FB8B2] text-white'
-                : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-            }`}>
-              {msg.reasoning && (
-                <div className="text-xs text-gray-500 dark:text-gray-400 italic mb-1 border-l-2 border-gray-300 dark:border-gray-600 pl-2">
-                  {msg.reasoning}
-                </div>
-              )}
-              <div className="whitespace-pre-wrap break-words">{msg.content || (isThinking && i === messages.length - 1 ? 'Thinking...' : '')}</div>
-              {msg.toolCalls?.map(tc => (
-                <ToolCallCard key={tc.toolCallId} toolCall={tc} />
-              ))}
+        {messages.map((msg, i) => {
+          const isLatestAssistant = msg.role === 'assistant' && i === messages.length - 1
+          return (
+            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+              <div className={`max-w-[80%] rounded-xl px-4 py-2 text-sm ${
+                msg.role === 'user'
+                  ? 'bg-[#4FB8B2] text-white'
+                  : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+              }`}>
+                {msg.reasoning && (
+                  <ThinkingDrawer reasoning={msg.reasoning} isThinking={isLatestAssistant && isThinking} />
+                )}
+                <div className="whitespace-pre-wrap break-words">{msg.content || (isThinking && i === messages.length - 1 ? 'Thinking...' : '')}</div>
+                {msg.toolCalls?.map(tc => (
+                  <ToolCallCard key={tc.toolCallId} toolCall={tc} />
+                ))}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
 
         {/* Pending permissions */}
         {pendingPermissions.map(pp => (
