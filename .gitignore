@@ -1,6 +1,7 @@
 
 # Node.js
 node_modules/
+.pnpm-store/
 .tanstack/
 .output/
 dist/

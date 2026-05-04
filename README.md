@@ -196,4 +196,5 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 - [x] Pocket: deterministic watchdog (HealthMonitor) for stall/loop/babble — no LLM, all code
 - [ ] Pocket: allow local models and local model calculator and ranking based on ollama models?
 - [ ] Pocket add context length? And maybe a compress?
+- [ ] Show context length in the UI.
 - [ ] Pocket: Change to backup model mid convo? Could probing LLM do this for you? Audit response beforehand?
