@@ -283,6 +283,12 @@ export class AgentRunner {
     for (const event of events) {
       switch (event.type) {
         case 'user_message':
+          // Flush any pending assistant group before the new user message
+          // so that conversation order is preserved (user → assistant → user).
+          if (currentGroup) {
+            groups.push(currentGroup)
+            currentGroup = null
+          }
           messages.push({
             role: 'user',
             content: event.payload.content,
