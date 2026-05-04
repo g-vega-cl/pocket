@@ -109,7 +109,7 @@ Event types (v1, deliberately small):
 | `tool_call_result` | Tool returned (success or error) |
 | `permission_requested` | Agent wants to do something that needs approval |
 | `permission_resolved` | User answered a permission request |
-| `status` | `cloning`, `working`, `idle`, `done`, `error` — derived state |
+| `status` | `creating`, `cloning`, `ready`, `working`, `idle`, `done`, `error` — derived state |
 | `compact_marker` | (v1.5) marks a compaction boundary |
 
 **Why this shape:** the client UI is a deterministic function of the event log. Refreshing the page replays events. Reconnecting after a phone-lock replays from `lastSeenSeq`. Two tabs viewing the same session show the same thing because they're rendering the same log.
@@ -462,10 +462,10 @@ Bash commands (foreground) optionally run inside persistent Podman containers in
 Session created with sandboxImage: "nikolaik/python-nodejs:python3.12-nodejs22"
   │
   ▼
-First user message → workspace ready
+Workspace setup starts immediately: clone repo
   │
   ▼
-Eager init: ensureContainer(sessionId, image, workspaceRoot)
+Workspace ready → Eager init: ensureContainer(sessionId, image, workspaceRoot)
   → podman run -d --name pocket-{sessionId} -v {ws}:/work:Z -w /work {image} sleep infinity
   → Container stays alive for the session lifetime
   │
@@ -541,7 +541,7 @@ Any Podman-compatible OCI image works. The image is pulled on first use (on dema
 | `packages/tools/src/background.ts` | Passes `ctx.sandboxImage` to `ProcessManager.spawn()` (kept ephemeral) |
 | `packages/agent/src/agent-runner.ts` | Stores `sandboxImage`, passes to `ToolContext`, includes in system prompt (`Sandbox: nikolaik/python-nodejs:python3.12-nodejs22`) |
 | `packages/agent/src/session-manager.ts` | Stores `sandboxImage` in session metadata, defaults from config; calls `stopSandboxContainer` on `deleteSession` |
-| `apps/server/src/index.ts` | Accepts `sandboxImage` on `POST /api/sessions`, podman check at startup, **eager init** of container after workspace setup, `killAllContainers` on shutdown |
+| `apps/server/src/index.ts` | Accepts `sandboxImage` on `POST /api/sessions`, podman check at startup, triggers **workspace setup** (clone, eager sandbox init, bootstrap) immediately on session creation, `killAllContainers` on shutdown |
 | `packages/core/src/index.ts` | `sandboxImage` field on `ToolContext`, `SessionMeta`, `PocketConfig` |
 
 #### What sandboxing does NOT cover
@@ -560,7 +560,7 @@ Any Podman-compatible OCI image works. The image is pulled on first use (on dema
 
 | Method | Path | Purpose |
 |---|---|---|
-| `POST` | `/api/sessions` | Create session, returns `{ id }` |
+| `POST` | `/api/sessions` | Create session, returns `{ id }`. Workspace setup (clone, sandbox, bootstrap) starts immediately and emits progress via SSE. |
 | `GET` | `/api/sessions` | List sessions (for history page) |
 | `GET` | `/api/sessions/:id` | Session metadata (status, model, branch) |
 | `GET` | `/api/sessions/:id/events` | **SSE stream**, supports `Last-Event-ID` |
@@ -843,7 +843,7 @@ Each milestone was independently shippable and testable.
 **M7 — Sandbox isolation** ✓
 - Persistent Podman containers per session (`podman run -d --name pocket-{sessionId}`)
 - `ensureContainer()` + `execInContainer()` replacing ephemeral `runInSandbox` for foreground bash
-- Eager container init after workspace setup (before agent loop starts)
+- Workspace setup (clone, eager sandbox init, bootstrap) on session creation, before first user message
 - 30-minute idle timeout with auto-removal
 - Default image: `nikolaik/python-nodejs:python3.12-nodejs22`
 - Background processes remain ephemeral (`--rm` per process)

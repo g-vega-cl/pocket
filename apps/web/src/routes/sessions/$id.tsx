@@ -157,7 +157,7 @@ function SessionChatView() {
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {/* Workspace setup progress (shown before any user messages) */}
-        {messages.filter(m => m.role === 'user').length === 0 && (status === 'creating' || status === 'cloning' || status === 'ready') && (
+        {messages.filter(m => m.role === 'user').length === 0 && (status === 'creating' || status === 'cloning' || status === 'ready' || status === 'working') && (
           <div className="flex justify-start">
             <div className="max-w-[80%] bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
               <div className="flex items-center gap-2 mb-2">
@@ -170,7 +170,8 @@ function SessionChatView() {
               <div className="space-y-1 mb-2">
                 {status === 'creating' && <div className="text-xs text-gray-500 dark:text-gray-400">Creating session...</div>}
                 {status === 'cloning' && <div className="text-xs text-gray-500 dark:text-gray-400">Cloning repository...</div>}
-                {status === 'ready' && <div className="text-xs text-gray-500 dark:text-gray-400">Analyzing repository...</div>}
+                {status === 'ready' && <div className="text-xs text-gray-500 dark:text-gray-400">Preparing workspace...</div>}
+                {status === 'working' && <div className="text-xs text-gray-500 dark:text-gray-400">Analyzing repository...</div>}
               </div>
               <div className="flex gap-1.5">
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />

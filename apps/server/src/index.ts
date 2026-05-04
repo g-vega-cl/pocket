@@ -188,7 +188,6 @@ export async function buildApp(options: BuildOptions) {
       sessionManager,
       eventLog,
       emitToSession,
-      options,
       bootstrapResults,
     )
     workspaceSetupPromises.set(session.id, setupPromise)
@@ -300,7 +299,12 @@ export async function buildApp(options: BuildOptions) {
     // ─── Workspace setup: wait for the async setup kicked off at session creation ───
     const setupPromise = workspaceSetupPromises.get(id)
     if (!session.localPath && setupPromise) {
-      await setupPromise
+      try {
+        await setupPromise
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        return reply.status(500).send({ error: `Workspace setup failed: ${message}` })
+      }
     }
 
     // Refresh session after setup completes
@@ -312,8 +316,6 @@ export async function buildApp(options: BuildOptions) {
     if (!workspaceRoot) {
       return reply.status(500).send({ error: 'Workspace setup did not produce a local path' })
     }
-    sessionManager.updateSession(id, { nextSeq: updatedSession.nextSeq })
-
     // Use the bootstrap result computed during workspace setup
     const bootstrapResult = bootstrapResults.get(id) ?? null
 
@@ -535,7 +537,6 @@ async function runWorkspaceSetup(
   sessionManager: SessionManager,
   eventLog: EventLog,
   emitToSession: (sessionId: string, event: Event) => void,
-  options: BuildOptions,
   bootstrapResults: Map<string, any>,
 ): Promise<void> {
   const id = session.id
@@ -726,6 +727,7 @@ async function runWorkspaceSetup(
     eventLog.append(id, errorEvent)
     emitToSession(id, errorEvent)
     sessionManager.updateSession(id, { status: 'error', nextSeq: session.nextSeq })
+    throw err
   }
 }
 
