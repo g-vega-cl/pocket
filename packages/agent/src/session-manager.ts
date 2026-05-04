@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import type { SessionMeta, SessionStatus, PocketConfig, PermissionLevel } from '@pocket/core'
-import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY } from '@pocket/core'
+import type { SessionMeta, SessionStatus, PocketConfig, PermissionLevel, WatchdogConfig } from '@pocket/core'
+import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY, DEFAULT_WATCHDOG_CONFIG } from '@pocket/core'
 import type { EventLog } from './event-log.js'
 import type { AgentRunner } from './agent-runner.js'
 import type { PermissionGate } from './permission-gate.js'
@@ -175,6 +175,11 @@ export class SessionManager {
       ? config.defaultSandboxImage
       : DEFAULT_SANDBOX_IMAGE
 
+    const watchdogConfig = {
+      ...DEFAULT_WATCHDOG_CONFIG,
+      ...config.watchdog,
+    }
+
     return {
       bashAllow: config.bashAllow ?? [],
       bashDeny: config.bashDeny ?? DEFAULT_BASH_DENY,
@@ -182,6 +187,7 @@ export class SessionManager {
       processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
       maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
       defaultSandboxImage,
+      watchdog: watchdogConfig,
     }
   }
 

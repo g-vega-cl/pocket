@@ -28,8 +28,8 @@ import {
   stopSandboxContainer,
   ensureContainer,
 } from '@pocket/tools'
-import type { Event, PocketConfig } from '@pocket/core'
-import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY } from '@pocket/core'
+import type { Event, PocketConfig, WatchdogConfig } from '@pocket/core'
+import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY, DEFAULT_WATCHDOG_CONFIG } from '@pocket/core'
 
 function getConfig(): PocketConfig {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '~'
@@ -46,6 +46,11 @@ function getConfig(): PocketConfig {
     ? config.defaultSandboxImage
     : DEFAULT_SANDBOX_IMAGE
 
+  const watchdogConfig = {
+    ...DEFAULT_WATCHDOG_CONFIG,
+    ...config.watchdog,
+  }
+
   return {
     bashAllow: config.bashAllow ?? [],
     bashDeny: config.bashDeny ?? DEFAULT_BASH_DENY,
@@ -53,6 +58,7 @@ function getConfig(): PocketConfig {
     processBufferSize: config.processBufferSize ?? 4 * 1024 * 1024,
     maxBackgroundProcesses: config.maxBackgroundProcesses ?? 8,
     defaultSandboxImage,
+    watchdog: watchdogConfig,
   }
 }
 
@@ -405,6 +411,7 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
       githubToken: updatedSession.githubToken,
       sandboxImage: updatedSession.sandboxImage,
       permissionGate,
+      watchdogConfig: config.watchdog,
       onPermissionAlwaysAllow: (toolName) => {
         sessionManager.persistPermissionRule(id, toolName, 'allow')
       },

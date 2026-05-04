@@ -150,6 +150,13 @@ export interface BashRuleConfig {
   bashDeny: string[]
 }
 
+export interface WatchdogConfig {
+  maxTurns: number
+  maxToolErrorStreak: number
+  noDeltaNudgeAt: number
+  toolRepetitionCount: number
+}
+
 export interface PocketConfig {
   bashAllow: string[]
   bashDeny: string[]
@@ -157,6 +164,14 @@ export interface PocketConfig {
   processBufferSize: number
   maxBackgroundProcesses: number
   defaultSandboxImage: string
+  watchdog: WatchdogConfig
+}
+
+export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
+  maxTurns: 50,
+  maxToolErrorStreak: 3,
+  noDeltaNudgeAt: 4,
+  toolRepetitionCount: 3,
 }
 
 export const DEFAULT_PROTECTED_BRANCHES = ['main', 'master', 'develop', 'pocket', 'staging', 'production']

@@ -14,7 +14,7 @@ pocket/
 │   ├── llm/          ← OpenRouter provider with stream normalization
 │   ├── tools/        ← 20 tool implementations (file, git, bash, web, background)
 │   └── agent/        ← AgentRunner, SessionManager, EventLog, PermissionGate,
-│                       ProcessManager, TokenCounter
+│                       ProcessManager, TokenCounter, HealthMonitor
 └── docs/
 ```
 
@@ -94,13 +94,13 @@ If Podman isn't installed, container init emits a warning but does not block —
 ## Test
 
 ```bash
-pnpm -r test              # All 229 tests across 6 packages
+pnpm -r test              # All 269 tests across 6 packages
 # or individually:
-pnpm --filter @pocket/agent test      # 85 tests
+pnpm --filter @pocket/agent test      # 123 tests
 pnpm --filter @pocket/tools test      # 84 tests
 pnpm --filter web test                # 22 tests
 pnpm --filter @pocket/server test     # 13 tests
-pnpm --filter @pocket/core test       #  9 tests
+pnpm --filter @pocket/core test       # 11 tests
 pnpm --filter @pocket/llm test        # 16 tests
 ```
 
@@ -127,16 +127,36 @@ Workspaces live in `~/.pocket/workspaces/{id}/`. Workspaces for `done`/`archived
 
 Read-only tools auto-allow. Writes inside the workspace auto-allow. Bash is gate by regex matchers in `~/.pocket/config.json`. Unknown commands require approval. The deny list (`rm -rf /`, `sudo`) cannot be overridden.
 
+### Watchdog
+
+A `HealthMonitor` watches the agent's event stream for stall, loop, and babble patterns.
+It injects `[watchdog]` messages when the agent announces actions without executing them,
+repeats identical tool calls without progress, stalls for multiple turns without state
+changes, or hits a streak of tool errors. No second LLM — all signals are deterministic,
+computed from the event log. Thresholds are set in `~/.pocket/config.json`:
+
+```jsonc
+{
+  "watchdog": {
+    "maxToolErrorStreak": 3,
+    "noDeltaNudgeAt": 4,
+    "toolRepetitionCount": 3,
+    "maxTurns": 50
+  }
+}
+```
+
+Every nudge is logged to `~/.pocket/watchdog.jsonl` for later analysis.
+
 ### Crash recovery
 
 On restart, sessions that were `working` are marked `interrupted`. The client shows a "Resume" button. The agent never auto-resumes — you decide.
 
 ## Docs
 
-| Document                             | Description           |
-| ------------------------------------ | --------------------- |
-| [Architecture](docs/Architecture.md) | Full technical design |
-| [User Stories](docs/UserStories.md)  | User flows            |
+| Document                             | Description       |
+| ------------------------------------ | ----------------- |
+| [Architecture](docs/Architecture.md) | Full tech design  |
 
 ## Tool inventory (v1)
 
@@ -172,9 +192,8 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 - [ ] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.
 - [ ] Take inspiration from Bolt.diy and https://github.com/Gitlawb/openclaude
 - [ ] Pocket: after thinking block is finished, hide it automatically and add a little collapsible to show it back if the user wants
-- [ ] Pocket: confirm containerized and be more aggressive with allowing commands inside container
-- [ ] Pocket: make sure agent doesn't get stuck in places like "now let me update XYZ. And it never updates it until I type "proceed". Maybe a super cheap or local LLM proving/checking the latest status
+- [x] Pocket: confirm containerized and be more aggressive with allowing commands inside container
+- [x] Pocket: deterministic watchdog (HealthMonitor) for stall/loop/babble — no LLM, all code
 - [ ] Pocket: allow local models and local model calculator and ranking based on ollama models?
 - [ ] Pocket add context length? And maybe a compress?
 - [ ] Pocket: Change to backup model mid convo? Could probing LLM do this for you? Audit response beforehand?
-- [ ] Pocket: check why babbling? Check what we are sending log before babbling starts? Check editing and going back one message to prevent babbling? - This should be automatic. I'm thinking of the probing llm being a "gamemaster"

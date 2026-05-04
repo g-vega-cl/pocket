@@ -1,9 +1,10 @@
-import type { Event, Message, ToolCall, ToolContext, Progress } from '@pocket/core'
+import type { Event, Message, ToolCall, ToolContext, Progress, WatchdogConfig } from '@pocket/core'
 import type { LLMProvider, LLMChunk } from '@pocket/core'
 import path from 'node:path'
 import type { EventLog } from './event-log.js'
 import type { ToolRegistry } from './tool-registry.js'
 import type { PermissionGate } from './permission-gate.js'
+import { HealthMonitor } from './health-monitor.js'
 
 interface AgentRunnerOptions {
   sessionId: string
@@ -20,6 +21,7 @@ interface AgentRunnerOptions {
   onEvent?: (event: Event) => void
   permissionGate?: PermissionGate
   onPermissionAlwaysAllow?: (toolName: string) => void
+  watchdogConfig?: Partial<WatchdogConfig>
 }
 
 export class AgentRunner {
@@ -44,6 +46,8 @@ export class AgentRunner {
     resolve: (allowed: boolean) => void
     toolName: string
   }>()
+  private monitor: HealthMonitor
+  private pendingNudge: string | null = null
 
   constructor(options: AgentRunnerOptions) {
     this.sessionId = options.sessionId
@@ -52,7 +56,6 @@ export class AgentRunner {
     this.tools = options.tools
     this.model = options.model
     this.systemPrompt = options.systemPrompt ?? 'You are Pocket, an autonomous coding agent.'
-    this.maxTurns = options.maxTurns ?? 50
     this.abortController = new AbortController()
     this.seq = options.startingSeq ?? 1
     this.onEvent = options.onEvent
@@ -62,6 +65,8 @@ export class AgentRunner {
     this.permissionGate = options.permissionGate
     this.onPermissionAlwaysAllow = options.onPermissionAlwaysAllow
     this.recentToolCallKeys = []
+    this.monitor = new HealthMonitor(this.sessionId, options.watchdogConfig)
+    this.maxTurns = options.maxTurns ?? this.monitor.getConfig().maxTurns
   }
 
   abort(): void {
@@ -105,6 +110,7 @@ export class AgentRunner {
   async runTurn(userMessage: { role: 'user'; content: string }): Promise<void> {
     // Reset loop-detection state for each new user turn
     this.recentToolCallKeys = []
+    this.monitor.resetForNewUserTurn()
 
     // Emit user message event
     this.emit({
@@ -198,6 +204,12 @@ export class AgentRunner {
             },
           })
         }
+
+        // Watchdog evaluation
+        const verdict = this.monitor.evaluate()
+        if (verdict.nudgeText) {
+          this.pendingNudge = verdict.nudgeText
+        }
       }
 
       // Check if we hit the turn cap
@@ -242,6 +254,12 @@ export class AgentRunner {
         role: 'system',
         content: this.systemPrompt,
       })
+    }
+
+    // Inject pending watchdog nudge as a user message
+    const nudge = this.monitor.consumeNudge()
+    if (nudge) {
+      messages.push({ role: 'user', content: nudge })
     }
 
     // Replay events to reconstruct conversation history
@@ -339,6 +357,22 @@ export class AgentRunner {
           })
         }
       }
+    }
+
+    // Token cap check
+    const tokens = this.provider.countTokens(messages)
+    const window = this.provider.capabilities(this.model).contextWindow
+    const pressure = tokens / window
+    if (pressure > 0.90) {
+      this.emit({
+        type: 'status',
+        payload: { status: 'error', message: `Token limit: ${tokens}/${window} (90%+). Start a new session.` },
+      })
+    } else if (pressure > 0.75) {
+      this.emit({
+        type: 'status',
+        payload: { status: 'working', message: `Token warning: ${tokens}/${window} (${Math.round(pressure * 100)}%).` },
+      })
     }
 
     return messages
@@ -593,6 +627,9 @@ export class AgentRunner {
 
     // Notify listener
     this.onEvent?.(fullEvent)
+
+    // Feed the watchdog monitor
+    this.monitor.feed(fullEvent)
   }
 }
 
