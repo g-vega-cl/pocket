@@ -141,8 +141,8 @@ computed from the event log. Thresholds are set in `~/.pocket/config.json`:
     "maxToolErrorStreak": 3,
     "noDeltaNudgeAt": 4,
     "toolRepetitionCount": 3,
-    "maxTurns": 50
-  }
+    "maxTurns": 50,
+  },
 }
 ```
 
@@ -154,9 +154,9 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 ## Docs
 
-| Document                             | Description       |
-| ------------------------------------ | ----------------- |
-| [Architecture](docs/Architecture.md) | Full tech design  |
+| Document                             | Description      |
+| ------------------------------------ | ---------------- |
+| [Architecture](docs/Architecture.md) | Full tech design |
 
 ## Tool inventory (v1)
 
@@ -188,7 +188,7 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 - [x] better virtualization
 - [x] pre-set up repo with instructions in `README.md`
-- [ ] add wrap in my input chat so I can see three lines of text. we can make it scrollable, is this a good practice?
+- [ ] add wrap in my input chat so I can see three lines of text. we can make it scrollable, is this a good practice? <textarea>?
 - [ ] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.
 - [ ] Take inspiration from Bolt.diy and https://github.com/Gitlawb/openclaude
 - [ ] Pocket: after thinking block is finished, hide it automatically and add a little collapsible to show it back if the user wants

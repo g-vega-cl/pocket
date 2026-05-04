@@ -16,10 +16,13 @@ const MODEL_CAPABILITIES: Record<string, ModelCapabilities> = {
   'deepseek/deepseek-chat-v3-0324': { contextWindow: 128000, supportsTools: true, supportsReasoning: true },
   'xiaomi/mimo-v2-flash': { contextWindow: 128000, supportsTools: true, supportsReasoning: false },
   'deepseek/deepseek-v4-flash': { contextWindow: 128000, supportsTools: true, supportsReasoning: true },
+  'minimax/minimax-m2.5': { contextWindow: 128000, supportsTools: true, supportsReasoning: false },
+  'stepfun/step-3.5-flash': { contextWindow: 128000, supportsTools: true, supportsReasoning: false },
 }
 
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1'
-const BACKUP_MODEL = 'minimax/minimax-m2.5:free'
+const BACKUP_MODEL = 'minimax/minimax-m2.5'
+const BACKUP_MODEL_2 = 'stepfun/step-3.5-flash'
 
 export class OpenRouterProvider implements LLMProvider {
   private apiKey: string
@@ -45,7 +48,7 @@ export class OpenRouterProvider implements LLMProvider {
         'X-OpenRouter-Cache': 'true',
       },
       body: JSON.stringify({
-        models: [req.model, req.model, BACKUP_MODEL],
+        models: [req.model, BACKUP_MODEL, BACKUP_MODEL_2],
         messages: this.applyPromptCaching(req.model, req.messages),
         tools: req.tools,
         stream: true,

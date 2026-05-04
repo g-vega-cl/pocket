@@ -161,7 +161,7 @@ async function* runTurn(session: Session, userMessage: Message) {
 - No manual retries or context-collapse — those wrap this loop, they don't pollute it.
 
 **Reliability & Cost Optimization (v1.1):**
-- **Automatic Fallbacks:** The LLM provider sends a list of models to OpenRouter: `[primary, primary, backup]`. This tells OpenRouter to try all available providers for the primary model, then retry them all again, before finally falling back to `minimax/minimax-m2.5:free`. This provides robust zero-config reliability.
+- **Automatic Fallbacks:** The LLM provider sends a list of models to OpenRouter: `[primary, backup1, backup2]`. This tells OpenRouter to try the primary model first, then fall back to `minimax/minimax-m2.5`, then `stepfun/step-3.5-flash`. This provides robust zero-config reliability.
 - **Response Caching:** The `X-OpenRouter-Cache: true` header is enabled. Identical requests within 5 minutes are served from cache at zero cost.
 - **Prompt Caching:** For Anthropic models, `cache_control` markers are automatically added to the system prompt and recent history (up to 4 breakpoints), reducing costs for long conversations by 90%.
 

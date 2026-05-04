@@ -20,7 +20,7 @@ describe('OpenRouterProvider Reliability', () => {
     } as Response)
   })
 
-  it('should include primary model twice and BACKUP_MODEL in the models array', async () => {
+  it('should include primary model, BACKUP_MODEL, and BACKUP_MODEL_2 in the models array', async () => {
     const req: ChatRequest = {
       model: 'deepseek/deepseek-chat',
       messages: [{ role: 'user', content: 'hi' }],
@@ -32,7 +32,7 @@ describe('OpenRouterProvider Reliability', () => {
     expect(globalThis.fetch).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
-        body: expect.stringContaining('"models":["deepseek/deepseek-chat","deepseek/deepseek-chat","minimax/minimax-m2.5:free"]'),
+        body: expect.stringContaining('"models":["deepseek/deepseek-chat","minimax/minimax-m2.5","stepfun/step-3.5-flash"]'),
       })
     )
   })
@@ -108,9 +108,9 @@ describe('OpenRouterProvider Reliability', () => {
     expect(messagesWithCache.length).toBe(4)
   })
 
-  it('should include BACKUP_MODEL in the list even if it is the primary model', async () => {
+  it('should include fallback chain even when primary matches a backup model', async () => {
     const req: ChatRequest = {
-      model: 'minimax/minimax-m2.5:free',
+      model: 'minimax/minimax-m2.5',
       messages: [{ role: 'user', content: 'hi' }],
     }
 
@@ -120,6 +120,6 @@ describe('OpenRouterProvider Reliability', () => {
     const fetchCall = vi.mocked(globalThis.fetch).mock.calls[0]
     const body = JSON.parse(fetchCall[1]!.body as string)
 
-    expect(body.models).toEqual(['minimax/minimax-m2.5:free', 'minimax/minimax-m2.5:free', 'minimax/minimax-m2.5:free'])
+    expect(body.models).toEqual(['minimax/minimax-m2.5', 'minimax/minimax-m2.5', 'stepfun/step-3.5-flash'])
   })
 })
