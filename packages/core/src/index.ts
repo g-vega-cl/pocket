@@ -24,8 +24,8 @@ export interface Event<T extends EventType = EventType> {
 
 export interface EventPayloadMap {
   user_message: { content: string }
-  assistant_text_delta: { text: string; reasoning?: string }
-  assistant_text_done: { text: string; reasoning?: string }
+  assistant_text_delta: { text: string; reasoning?: string; model?: string }
+  assistant_text_done: { text: string; reasoning?: string; model?: string }
   tool_call_start: { toolCallId: string; toolName: string; args: Record<string, unknown> }
   tool_call_progress: { toolCallId: string; toolName: string; message: string }
   tool_call_result: { toolCallId: string; toolName: string; result?: unknown; error?: string }
@@ -198,6 +198,8 @@ export interface LLMChunk {
     name: string
     arguments: string
   }
+  /** The actual model used by the provider (may differ from requested due to fallback) */
+  model?: string
 }
 
 export interface ChatUsage {

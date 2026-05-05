@@ -233,6 +233,8 @@ function SessionChatView() {
 
         {messages.map((msg, i) => {
           const isLatestAssistant = msg.role === 'assistant' && i === messages.length - 1
+          const isFallback = msg.role === 'assistant' && msg.model && session?.model &&
+            !msg.model.startsWith(session.model) && !session.model.startsWith(msg.model)
           return (
             <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div className={`max-w-[80%] rounded-xl px-4 py-2 text-sm ${
@@ -248,9 +250,19 @@ function SessionChatView() {
                   <ToolCallCard key={tc.toolCallId} toolCall={tc} />
                 ))}
               </div>
-              <span className="text-[10px] mt-0.5 px-1 text-gray-400 dark:text-gray-500">
-                {formatMessageTime(msg.timestamp)}
-              </span>
+              <div className="flex items-center gap-2 mt-0.5 px-1">
+                {msg.role === 'assistant' && msg.model && (
+                  <span
+                    className={`text-[10px] font-mono ${isFallback ? 'text-orange-500 dark:text-orange-400' : 'text-gray-400 dark:text-gray-500'}`}
+                    title={isFallback ? `Requested: ${session?.model} — Fallback: ${msg.model}` : `Model: ${msg.model}`}
+                  >
+                    {isFallback ? '\u26A0 ' : ''}{msg.model}
+                  </span>
+                )}
+                <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                  {formatMessageTime(msg.timestamp)}
+                </span>
+              </div>
             </div>
           )
         })}

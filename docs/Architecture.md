@@ -112,6 +112,8 @@ Event types (v1, deliberately small):
 | `status` | `creating`, `cloning`, `ready`, `working`, `idle`, `done`, `error` — derived state |
 | `compact_marker` | (v1.5) marks a compaction boundary |
 
+The `assistant_text_delta` and `assistant_text_done` events carry a `model` field (the actual model that served the response, or `undefined` if unknown). This is how the UI displays the model name below assistant message bubbles — especially useful when OpenRouter falls back to a backup model.
+
 **Why this shape:** the client UI is a deterministic function of the event log. Refreshing the page replays events. Reconnecting after a phone-lock replays from `lastSeenSeq`. Two tabs viewing the same session show the same thing because they're rendering the same log.
 
 ---
@@ -162,6 +164,7 @@ async function* runTurn(session: Session, userMessage: Message) {
 
 **Reliability & Cost Optimization (v1.1):**
 - **Automatic Fallbacks:** The LLM provider sends a list of models to OpenRouter: `[primary, backup1, backup2]`. This tells OpenRouter to try the primary model first, then fall back to `minimax/minimax-m2.5`, then `stepfun/step-3.5-flash`. This provides robust zero-config reliability.
+- **Model tracking:** The agent captures `parsed.model` from OpenRouter SSE responses (the `/v1/chat/completions` endpoint returns the actual model in every data line). When a fallback occurs, the actual model differs from the requested one. This is propagated through `LLMChunk.model` → `assistant_text_done.model` → `ChatMessage.model` and displayed in the UI. If the model differs from the session's configured model, it appears with an orange warning indicator and a tooltip showing "Requested: X — Fallback: Y".
 - **Response Caching:** The `X-OpenRouter-Cache: true` header is enabled. Identical requests within 5 minutes are served from cache at zero cost.
 - **Prompt Caching:** For Anthropic models, `cache_control` markers are automatically added to the system prompt and recent history (up to 4 breakpoints), reducing costs for long conversations by 90%.
 
@@ -674,10 +677,22 @@ interface LLMProvider {
 ### Stream normalization
 
 OpenRouter routes to many providers, each with quirks. Normalize them at the edge:
-- `delta.content` may be string or array (your existing observation)
+
+```ts
+interface LLMChunk {
+  type: 'text' | 'tool_call' | 'reasoning'
+  text?: string
+  reasoning?: string
+  toolCall?: { id: string; name: string; arguments: string }
+  model?: string    // actual model that served this response (from parsed.model)
+}
+```
+
+- `delta.content` may be string or array — collapse to `chunk.text`
 - Reasoning lives in `delta.reasoning` (DeepSeek) or `delta.reasoning_content` (others) — collapse both to `chunk.reasoning`
 - Tool calls stream incrementally (args arrive as fragments) — accumulate them per `tool_call.id` and emit a single `tool_call` chunk when complete
 - Some providers emit usage in the final SSE event, others don't — accept both
+- **Model capture:** OpenRouter's SSE data lines include a `model` field at the top level (e.g. `{"model":"deepseek/deepseek-chat",...}`). This reflects the actual model that served the request — critical for detecting fallbacks. Parse it and attach to every yielded chunk.
 
 This logic lives in `OpenRouterProvider`, not in the agent loop. The loop only sees normalized `LLMChunk`s.
 
@@ -713,6 +728,12 @@ Components (`StatusBadge`, `ToolCallCard`, `PermissionPrompt`) are co-located in
 
 1. **Render from the event log, don't store derived state separately.** A `useReducer` over the event stream produces the message list. This is identical to how the server thinks — same mental model on both sides, fewer bugs.
 2. **Optimistic user messages.** When you submit, render the message immediately with a pending state. Replace it with the server's authoritative version when the corresponding `user_message` event arrives. Same pattern for permission resolutions.
+
+### Model display in message bubbles
+
+Assistant message bubbles show the actual model name (from `ChatMessage.model`) in a monospace font below the bubble, alongside the timestamp. The reducer tracks `currentModel` through `assistant_text_delta` and `assistant_text_done` events, storing it on the finalized message.
+
+When the actual model differs from the session's configured model, the display turns orange with a warning indicator and a tooltip showing the requested model vs. the fallback. The fallback check uses prefix matching (e.g. `deepseek/deepseek-chat-v3-0324` is not flagged as a fallback for `deepseek/deepseek-chat`) to avoid false positives from model variants.
 
 ### SSR caveat
 

@@ -133,6 +133,7 @@ export class AgentRunner {
         let assistantText = ''
         let reasoning = ''
         const toolCalls: ToolCall[] = []
+        let actualModel: string | undefined
 
         const stream = this.provider.streamChat({
           model: this.model,
@@ -145,6 +146,11 @@ export class AgentRunner {
 
         while (!streamResult.done && !this.abortController.signal.aborted) {
           const chunk: LLMChunk = streamResult.value
+
+          // Track the actual model used (may differ from requested due to fallback)
+          if (chunk.model) {
+            actualModel = chunk.model
+          }
 
           if (chunk.type === 'text' && chunk.text) {
             assistantText += chunk.text
@@ -188,10 +194,14 @@ export class AgentRunner {
           })
         }
 
-        // Emit assistant text done
+        // Emit assistant text done with actual model info
         this.emit({
           type: 'assistant_text_done',
-          payload: { text: assistantText, reasoning: reasoning || undefined },
+          payload: {
+            text: assistantText,
+            reasoning: reasoning || undefined,
+            model: actualModel || this.model,
+          },
         })
 
         // If no tool calls, break

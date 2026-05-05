@@ -22,6 +22,7 @@ export interface ChatMessage {
   reasoning?: string
   timestamp: number
   toolCalls?: ToolCallState[]
+  model?: string
 }
 
 export interface PendingPermission {
@@ -89,6 +90,7 @@ export function reduceEvents(events: Event[]): ChatState {
 
   let currentAssistantContent = ''
   let currentReasoning = ''
+  let currentModel: string | undefined
   let hasStreamingAssistant = false
 
   for (const event of events) {
@@ -103,9 +105,11 @@ export function reduceEvents(events: Event[]): ChatState {
             content: currentAssistantContent,
             reasoning: currentReasoning || undefined,
             timestamp: Date.now(),
+            model: currentModel,
           })
           currentAssistantContent = ''
           currentReasoning = ''
+          currentModel = undefined
           hasStreamingAssistant = false
         }
         state.messages.push({
@@ -119,7 +123,11 @@ export function reduceEvents(events: Event[]): ChatState {
       case 'assistant_text_delta': {
         const text = String(event.payload.text ?? '')
         const reasoning = event.payload.reasoning ? String(event.payload.reasoning) : undefined
+        const model = event.payload.model ? String(event.payload.model) : undefined
 
+        if (model) {
+          currentModel = model
+        }
         if (reasoning && reasoning.length > 0) {
           currentReasoning += reasoning
         }
@@ -132,15 +140,21 @@ export function reduceEvents(events: Event[]): ChatState {
 
       case 'assistant_text_done':
         if (hasStreamingAssistant) {
+          // Capture model from payload if present
+          if (event.payload.model) {
+            currentModel = String(event.payload.model)
+          }
           state.messages.push({
             id: makeId(),
             role: 'assistant',
             content: currentAssistantContent,
             reasoning: currentReasoning || undefined,
             timestamp: event.ts,
+            model: currentModel,
           })
           currentAssistantContent = ''
           currentReasoning = ''
+          currentModel = undefined
           hasStreamingAssistant = false
         }
         break
@@ -239,6 +253,7 @@ export function reduceEvents(events: Event[]): ChatState {
       content: currentAssistantContent,
       reasoning: currentReasoning || undefined,
       timestamp: Date.now(),
+      model: currentModel,
     })
   }
 

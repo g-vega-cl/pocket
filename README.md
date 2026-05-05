@@ -198,3 +198,4 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 - [ ] Pocket add context length? And maybe a compress?
 - [ ] Show context length in the UI.
 - [ ] Pocket: Change to backup model mid convo? Could probing LLM do this for you? Audit response beforehand?
+- [ ] Pocket: check if you can use commands in your server like supabase
