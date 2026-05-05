@@ -73,6 +73,8 @@ export class OpenRouterProvider implements LLMProvider {
     let currentToolArgs = ''
     let usage: ChatUsage | null = null
 
+    let actualModel: string | undefined
+
     try {
       while (true) {
         const { done, value } = await reader.read()
@@ -91,6 +93,11 @@ export class OpenRouterProvider implements LLMProvider {
             const parsed = JSON.parse(data)
             const delta = parsed.choices?.[0]?.delta
 
+            // Capture the actual model used (OpenRouter may fallback to backup models)
+            if (parsed.model && typeof parsed.model === 'string') {
+              actualModel = parsed.model
+            }
+
             // Capture usage from any event that has it
             if (parsed.usage) {
               usage = {
@@ -105,7 +112,7 @@ export class OpenRouterProvider implements LLMProvider {
             // Normalize reasoning
             const reasoning = delta.reasoning_content ?? delta.reasoning
             if (reasoning && typeof reasoning === 'string' && reasoning.length > 0) {
-              yield { type: 'reasoning', reasoning }
+              yield { type: 'reasoning', reasoning, model: actualModel }
             }
 
             // Text content — OpenRouter may return content as string or array
@@ -116,7 +123,7 @@ export class OpenRouterProvider implements LLMProvider {
                   ? delta.content.map((c: { text?: string }) => c.text ?? '').join('')
                   : ''
               if (text) {
-                yield { type: 'text', text }
+                yield { type: 'text', text, model: actualModel }
               }
             }
 
@@ -134,6 +141,7 @@ export class OpenRouterProvider implements LLMProvider {
                       name: currentToolName,
                       arguments: currentToolArgs,
                     },
+                    model: actualModel,
                   }
                 }
                 currentToolName = tc.function.name
@@ -161,6 +169,7 @@ export class OpenRouterProvider implements LLMProvider {
             name: currentToolName,
             arguments: currentToolArgs,
           },
+          model: actualModel,
         }
       }
 
