@@ -14,7 +14,7 @@ These are not platitudes — every decision in this doc traces back to one of th
 2. **Append-only, replayable.** Sessions are an event log on disk. Anything the client missed can be replayed. This is how reconnection becomes a non-feature.
 3. **The agent loop is small. The systems around it are large.** Following Claude Code's design: a 50-line `while` loop calls the model and runs tools. Permissions, persistence, and recovery live in the systems around it.
 4. **Permissions over prompts.** A remote agent that constantly halts for approval is useless. Sensible auto-allow defaults plus a "pending approvals" queue that survives disconnect.
-5. **Defer cleverness.** No subagents, no compaction pipeline, no MCP, no hooks in v1. They have a designed-in seam, but no implementation.
+5. **Defer cleverness.** No subagents, no compaction pipeline, no MCP, no hooks in v1. They have a designed-in seam, but no implementation. Exceptions: the prompt improver (§19) is a purpose-built side conversation that deliberately stays out of the event log.
 6. **One transport, one protocol.** SSE for server→client, REST for client→server. No WebSockets, no polling.
 
 ---
@@ -176,6 +176,8 @@ async function* runTurn(session: Session, userMessage: Message) {
 
 **Message reconstruction:**
 The event log is replayed to build the LLM's conversation history on every turn. Tool calls and their results are grouped per-assistant-response, not lumped together. This ensures multi-turn sessions maintain correct context — the model sees which tools it called in each iteration and what they returned.
+
+The reconstruction logic is extracted into a standalone function, `buildConversationFromEvents` (`packages/agent/src/conversation-builder.ts`), shared by both `AgentRunner.buildMessages()` and the prompt improver endpoint (§19). It takes an array of events and an optional system prompt, and returns a properly ordered `Message[]` suitable for any LLM API call.
 
 ---
 
@@ -596,6 +598,7 @@ Any Podman-compatible OCI image works. The image is pulled on first use (on dema
 | `GET` | `/api/sessions/:id` | Session metadata (status, model, branch) |
 | `GET` | `/api/sessions/:id/events` | **SSE stream**, supports `Last-Event-ID` |
 | `POST` | `/api/sessions/:id/messages` | Send chat message |
+| `POST` | `/api/sessions/:id/improve` | Prompt improvement — separate LLM call with full session context, never touches event log |
 | `POST` | `/api/sessions/:id/abort` | Stop the agent mid-turn |
 | `POST` | `/api/sessions/:id/permission` | Resolve a permission request |
 | `POST` | `/api/sessions/:id/commit` | Manual commit |
@@ -947,7 +950,104 @@ Resolved during implementation:
 
 8. **Auto-bootstrap on clone** — after workspace is ready (cloned + sandbox started), `bootstrap_repo` tool automatically runs. It detects project type (node/python/rust/go), package manager (npm/pnpm/yarn/pip/cargo), scripts from package.json, config files (Vite, React, Next.js, Express, FastAPI, Django), and suggested dev server ports. It runs dependency install in the sandbox. Results are included in the agent's system prompt so the agent knows the exact commands for this repo instead of guessing.
 
+9. **Prompt improver** — an interactive prompt refinement tool accessible via the **✨ Improve** button in the chat composer. Opens a modal with a mini-chat to a separate LLM call (same session model) that has access to the full session conversation history. The improver asks clarifying questions, suggests improvements, and produces a refined prompt. When the user clicks **Apply**, the final prompt replaces the textarea. Key design: the improver's API (`POST /api/sessions/:id/improve`) never touches `events.jsonl`, never emits SSE events, and never goes through `AgentRunner`. The conversation state lives in the React modal. Only the final accepted prompt enters the main chat. See §19.
+
 Still open:
 - **Web push** — deferred to v1.5 per §6.
 - **Compaction** — token cap only in v1. Real compaction (compact_marker events, summary injection) is v1.5.
 - **Background process UI** — process list panel in the chat view is implemented as a flat list; a richer panel with per-process controls is deferred.
+
+---
+
+## 19. Prompt improver
+
+The prompt improver is a separate mini-chat that helps users refine prompts before sending them to the main agent. It deliberately stays **outside** the event log and agent loop — only the final accepted prompt enters the session.
+
+### Design
+
+```
+User types draft → clicks ✨ Improve
+      │
+      ▼
+ImproverModal (React, client-side state)
+      │
+      ▼
+POST /api/sessions/:id/improve   { draft, conversation[] }
+      │
+      ▼
+Server: reads full session context from events.jsonl
+      │  via buildConversationFromEvents()
+      ▼
+Separate OpenRouterProvider.streamChat() call
+      │  (same session model, same API key)
+      │  NOT through AgentRunner — no event log writes, no SSE
+      ▼
+Returns { content, model } as JSON (non-streaming to client)
+      │
+      ▼
+ImproverModal shows response, user can reply, iterate
+      │
+      ▼
+User clicks "Apply" → one final call: "produce final improved prompt"
+      │
+      ▼
+Improved prompt replaces the textarea → user clicks Send
+      │  (enters AgentRunner via normal POST /sessions/:id/messages)
+```
+
+### Key constraints
+
+| Constraint | How it's met |
+|---|---|
+| **Must not pollute LLM context** | Separate `streamChat()` call, never through `AgentRunner` |
+| **Must have full context** | Server reads `events.jsonl` via `buildConversationFromEvents()`, filters to user/assistant text, includes as system message |
+| **Must be interactive** | Client manages conversation state in React; each turn is a separate API call |
+| **Must use session's model** | Server reads `session.model` and passes it to the improver |
+
+### Server endpoint
+
+```
+POST /api/sessions/:id/improve
+Content-Type: application/json
+
+{
+  "draft": "the user's current text (or reply)",
+  "conversation": [
+    {"role": "user", "content": "..."},
+    {"role": "assistant", "content": "..."}
+  ]
+}
+
+Response:
+{
+  "content": "improved prompt or clarifying questions",
+  "model": "deepseek/deepseek-chat"
+}
+```
+
+### Improver system prompt
+
+The improver receives a system prompt telling it:
+1. It's a prompt refinement assistant with access to the full session context
+2. If the draft is vague, ask up to 3 specific clarifying questions
+3. If the draft is clear, produce an improved version directly
+4. When explicitly asked to finalize, output **only** the improved prompt text, no commentary
+
+### Conversation builder extraction
+
+The message reconstruction logic was extracted from `AgentRunner.buildMessages()` into a standalone, exported function:
+
+```
+packages/agent/src/conversation-builder.ts  →  buildConversationFromEvents()
+```
+
+This pure function takes `Event[]` and optional `{ systemPrompt, nudgeText }`, returns `Message[]`. Both `AgentRunner.buildMessages()` and the `/improve` endpoint use it — the agent includes watchdog nudges and token checks; the improver includes the full session context and improver conversation history.
+
+### UI
+
+The improver is a purple-themed modal (`apps/web/src/components/ImproverModal.tsx`) with:
+- Scrollable conversation showing improver messages (purple background) and user replies (teal background)
+- Text input + Send button for replies
+- **Apply Improved Prompt** button that sends a final "produce the final version" message and replaces the main textarea
+- Cancel button to close without saving
+- "✨ Improve" button in the main composer row (visible when textarea is non-empty and agent is idle)

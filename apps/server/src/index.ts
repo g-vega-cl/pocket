@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 config({ path: path.resolve(__dirname, '..', '..', '..', '.env') })
 
-import { SessionManager, EventLog, ToolRegistry, AgentRunner, ProcessManager, PermissionGate } from '@pocket/agent'
+import { SessionManager, EventLog, ToolRegistry, AgentRunner, ProcessManager, PermissionGate, buildConversationFromEvents } from '@pocket/agent'
 import { OpenRouterProvider } from '@pocket/llm'
 import {
   readFileTool, listFilesTool, writeFileTool, editFileTool,
@@ -28,7 +28,7 @@ import {
   stopSandboxContainer,
   ensureContainer,
 } from '@pocket/tools'
-import type { Event, PocketConfig, WatchdogConfig } from '@pocket/core'
+import type { Event, PocketConfig, WatchdogConfig, Message } from '@pocket/core'
 import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY, DEFAULT_WATCHDOG_CONFIG } from '@pocket/core'
 
 function getConfig(): PocketConfig {
@@ -434,6 +434,105 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
     })
 
     return { ok: true, sessionId: id }
+  })
+
+  // Prompt improvement — separate LLM call, does NOT write to event log
+  app.post('/api/sessions/:id/improve', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const { draft, conversation } = request.body as {
+      draft: string
+      conversation?: Array<{ role: 'user' | 'assistant'; content: string }>
+    }
+
+    const session = sessionManager.getSession(id)
+    if (!session) {
+      return reply.status(404).send({ error: 'Session not found' })
+    }
+
+    if (!draft || !draft.trim()) {
+      return reply.status(400).send({ error: 'draft is required' })
+    }
+
+    const apiKey = options.env?.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY
+    if (!apiKey) {
+      return reply.status(500).send({ error: 'OPENROUTER_API_KEY not configured' })
+    }
+
+    const provider = new OpenRouterProvider({ apiKey })
+
+    // Get full session context from the event log
+    const events = eventLog.replaySync(id)
+    const sessionMsgs = buildConversationFromEvents(events)
+
+    // Filter to just user/assistant text for context (skip tool messages — noise for the improver)
+    const contextLines = sessionMsgs
+      .filter(m => (m.role === 'user' || m.role === 'assistant') && m.content)
+      .map(m => `${m.role === 'user' ? 'User' : 'Agent'}: ${m.content}`)
+      .join('\n\n')
+
+    const improverSystemPrompt = `You are a prompt improvement assistant working inside Pocket, a coding agent.
+Your job is to help the user write better prompts for their coding session.
+
+You have access to the full conversation history of this session, so you understand the full context.
+
+When the user shares a draft prompt:
+1. If the draft is vague or missing important details, ask up to 3 specific clarifying questions
+2. If the draft is already clear, produce an improved version directly (more specific, actionable, context-aware)
+3. When explicitly asked to finalize, output ONLY the final improved prompt text with no other commentary
+
+Be concise and direct. Focus on making the prompt more specific, actionable, and context-aware given the session's state.`
+
+    const messages: Message[] = [
+      { role: 'system', content: improverSystemPrompt },
+    ]
+
+    if (contextLines) {
+      messages.push({
+        role: 'system',
+        content: `=== SESSION CONTEXT (conversation history) ===\n\n${contextLines}`,
+      })
+    }
+
+    // Include previous improver conversation
+    if (conversation && conversation.length > 0) {
+      for (const msg of conversation) {
+        messages.push({ role: msg.role, content: msg.content })
+      }
+    }
+
+    // Include the current draft
+    const isFirstTurn = !conversation || conversation.length === 0
+    messages.push({
+      role: 'user',
+      content: isFirstTurn
+        ? `The user wants to improve this draft prompt. Please help refine it:\n\n"${draft}"`
+        : draft,
+    })
+
+    try {
+      const stream = provider.streamChat({
+        model: session.model,
+        messages,
+      })
+
+      let content = ''
+      let actualModel: string | undefined
+
+      let result = await stream.next()
+      while (!result.done) {
+        const chunk = result.value
+        if (chunk.model) actualModel = chunk.model
+        if (chunk.type === 'text' && chunk.text) {
+          content += chunk.text
+        }
+        result = await stream.next()
+      }
+
+      return { content, model: actualModel || session.model }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return reply.status(500).send({ error: message })
+    }
   })
 
   // Abort agent

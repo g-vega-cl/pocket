@@ -5,6 +5,7 @@ import type { EventLog } from './event-log.js'
 import type { ToolRegistry } from './tool-registry.js'
 import type { PermissionGate } from './permission-gate.js'
 import { HealthMonitor } from './health-monitor.js'
+import { buildConversationFromEvents } from './conversation-builder.js'
 
 interface AgentRunnerOptions {
   sessionId: string
@@ -281,124 +282,13 @@ export class AgentRunner {
   }
 
   private buildMessages(_userMessage: { role: 'user'; content: string }): Message[] {
-    const messages: Message[] = []
-
-    // System prompt
-    if (this.systemPrompt) {
-      messages.push({
-        role: 'system',
-        content: this.systemPrompt,
-      })
-    }
-
-    // Inject pending watchdog nudge as a user message
-    const nudge = this.monitor.consumeNudge()
-    if (nudge) {
-      messages.push({ role: 'user', content: nudge })
-    }
-
-    // Replay events to reconstruct conversation history
     const events = this.eventLog.replaySync(this.sessionId)
+    const nudge = this.monitor.consumeNudge()
 
-    // Group events by assistant response. Each assistant_text_done starts a new group
-    // that may be followed by tool_call_start + tool_call_result pairs.
-    type AssistantGroup = {
-      text: string | null
-      toolCalls: Array<{
-        id: string
-        name: string
-        args: Record<string, unknown>
-      }>
-      toolResults: Map<string, { result?: unknown; error?: string }>
-    }
-
-    const groups: AssistantGroup[] = []
-    let currentGroup: AssistantGroup | null = null
-
-    for (const event of events) {
-      switch (event.type) {
-        case 'user_message':
-          // Flush any pending assistant group before the new user message
-          // so that conversation order is preserved (user → assistant → user).
-          if (currentGroup) {
-            groups.push(currentGroup)
-            currentGroup = null
-          }
-          messages.push({
-            role: 'user',
-            content: event.payload.content,
-          })
-          break
-
-        case 'assistant_text_done':
-          if (currentGroup) {
-            groups.push(currentGroup)
-          }
-          currentGroup = {
-            text: event.payload.text || null,
-            toolCalls: [],
-            toolResults: new Map(),
-          }
-          break
-
-        case 'tool_call_start':
-          if (currentGroup) {
-            currentGroup.toolCalls.push({
-              id: event.payload.toolCallId,
-              name: event.payload.toolName,
-              args: event.payload.args,
-            })
-          }
-          break
-
-        case 'tool_call_result':
-          if (currentGroup) {
-            currentGroup.toolResults.set(event.payload.toolCallId, {
-              result: event.payload.result,
-              error: event.payload.error,
-            })
-          }
-          break
-      }
-    }
-
-    if (currentGroup) {
-      groups.push(currentGroup)
-    }
-
-    // Convert groups to assistant + tool messages
-    for (const group of groups) {
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content: group.text,
-      }
-
-      if (group.toolCalls.length > 0) {
-        assistantMsg.tool_calls = group.toolCalls.map(tc => ({
-          id: tc.id,
-          type: 'function' as const,
-          function: {
-            name: tc.name,
-            arguments: JSON.stringify(tc.args),
-          },
-        }))
-      }
-
-      messages.push(assistantMsg)
-
-      for (const tc of group.toolCalls) {
-        const result = group.toolResults.get(tc.id)
-        if (result) {
-          messages.push({
-            role: 'tool',
-            tool_call_id: tc.id,
-            content: JSON.stringify(
-              result.error ? { error: result.error } : { result: result.result }
-            ),
-          })
-        }
-      }
-    }
+    const messages = buildConversationFromEvents(events, {
+      systemPrompt: this.systemPrompt,
+      nudgeText: nudge ?? undefined,
+    })
 
     // Token cap check
     const tokens = this.provider.countTokens(messages)
@@ -682,9 +572,3 @@ function safeParseJSON(str: string): Record<string, unknown> {
   }
 }
 
-function findLastIndex<T>(arr: T[], predicate: (item: T) => boolean): number {
-  for (let i = arr.length - 1; i >= 0; i--) {
-    if (predicate(arr[i])) return i
-  }
-  return -1
-}

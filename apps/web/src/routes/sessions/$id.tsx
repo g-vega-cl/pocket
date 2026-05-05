@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { usePocketSession } from '#/hooks/usePocketSession.js'
 import { ThinkingDrawer } from '#/components/ThinkingDrawer.js'
+import { ImproverModal } from '#/components/ImproverModal.js'
 import type { PendingPermission } from '#/state/events.js'
 
 function formatMessageTime(ts: number): string {
@@ -181,6 +182,7 @@ function SessionChatView() {
   } = usePocketSession(id)
 
   const [input, setInput] = useState('')
+  const [showImprover, setShowImprover] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -324,6 +326,15 @@ function SessionChatView() {
           rows={1}
           className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[200px] [field-sizing:content]"
         />
+        {!isThinking && input.trim() && (
+          <button
+            type="button"
+            onClick={() => setShowImprover(true)}
+            className="px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            ✨ Improve
+          </button>
+        )}
         {isThinking ? (
           <button
             type="button"
@@ -342,6 +353,18 @@ function SessionChatView() {
           </button>
         )}
       </form>
+
+      {showImprover && (
+        <ImproverModal
+          sessionId={id}
+          draft={input}
+          onApply={(improved) => {
+            setInput(improved)
+            setShowImprover(false)
+          }}
+          onClose={() => setShowImprover(false)}
+        />
+      )}
     </div>
   )
 }

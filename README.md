@@ -148,6 +148,10 @@ computed from the event log. Thresholds are set in `~/.pocket/config.json`:
 
 Every nudge is logged to `~/.pocket/watchdog.jsonl` for later analysis.
 
+### Prompt improver
+
+An interactive prompt refinement tool that helps you write better prompts without polluting the agent's context. Click **✨ Improve** next to the composer to open a mini-chat with an improver agent that has access to the full session conversation. It asks clarifying questions, suggests improvements, and produces a refined prompt. The improvement conversation is a separate LLM call — it never touches the event log or the agent's context. Only the final accepted prompt enters the main chat.
+
 ### Crash recovery
 
 On restart, sessions that were `working` are marked `interrupted`. The client shows a "Resume" button. The agent never auto-resumes — you decide.
@@ -186,10 +190,8 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 ## TODO - ROADMAP
 
-- [ ] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.
+- [x] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.
 - [ ] Take inspiration from Bolt.diy and https://github.com/Gitlawb/openclaude
-- [ ] Pocket: after thinking block is finished, hide it automatically and add a little collapsible to show it back if the user wants
 - [ ] Pocket: allow local models and local model calculator and ranking based on ollama models?
 - [ ] And maybe a compress? - Or it might be better to just stop the convo once it gets too long? - Ask the user to retry or make a new prompt to start again with? - Isn't that basically the compress?
-- [ ] Pocket: Change to backup model mid convo? Could probing LLM do this for you? Audit response beforehand?
-- [ ] Pocket: check if you can use commands in your server like supabase
+- [ ] Pocket: check if you can use commands in your server like supabase - not now, we could do: options: install in the container image (npm install -g supabase), bind-mount the host binary at runtime, or run supabase in a sidecar container

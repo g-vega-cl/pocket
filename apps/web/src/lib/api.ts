@@ -42,6 +42,16 @@ export interface CreateSessionInput {
   isLocal?: boolean
 }
 
+export interface ImprovePromptRequest {
+  draft: string
+  conversation?: Array<{ role: 'user' | 'assistant'; content: string }>
+}
+
+export interface ImprovePromptResponse {
+  content: string
+  model: string
+}
+
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${url}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -107,5 +117,12 @@ export const api = {
 
   createPR(id: string): Promise<{ ok: boolean; prUrl?: string }> {
     return request(`/sessions/${id}/pr`, { method: 'POST' })
+  },
+
+  improvePrompt(id: string, input: ImprovePromptRequest): Promise<ImprovePromptResponse> {
+    return request(`/sessions/${id}/improve`, {
+      method: 'POST',
+      body: JSON.stringify(input),
+    })
   },
 }
