@@ -4,6 +4,26 @@ import { usePocketSession } from '#/hooks/usePocketSession.js'
 import { ThinkingDrawer } from '#/components/ThinkingDrawer.js'
 import type { PendingPermission } from '#/state/events.js'
 
+function formatMessageTime(ts: number): string {
+  const date = new Date(ts)
+  const now = new Date()
+  const isToday =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+
+  const hours = date.getHours().toString().padStart(2, '0')
+  const minutes = date.getMinutes().toString().padStart(2, '0')
+
+  if (isToday) {
+    return `${hours}:${minutes}`
+  }
+
+  const month = (date.getMonth() + 1).toString().padStart(2, '0')
+  const day = date.getDate().toString().padStart(2, '0')
+  return `${month}/${day} ${hours}:${minutes}`
+}
+
 export const Route = createFileRoute('/sessions/$id')({
   component: SessionChatView,
 })
@@ -214,7 +234,7 @@ function SessionChatView() {
         {messages.map((msg, i) => {
           const isLatestAssistant = msg.role === 'assistant' && i === messages.length - 1
           return (
-            <div key={msg.id} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+            <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
               <div className={`max-w-[80%] rounded-xl px-4 py-2 text-sm ${
                 msg.role === 'user'
                   ? 'bg-[#4FB8B2] text-white'
@@ -228,6 +248,9 @@ function SessionChatView() {
                   <ToolCallCard key={tc.toolCallId} toolCall={tc} />
                 ))}
               </div>
+              <span className="text-[10px] mt-0.5 px-1 text-gray-400 dark:text-gray-500">
+                {formatMessageTime(msg.timestamp)}
+              </span>
             </div>
           )
         })}
