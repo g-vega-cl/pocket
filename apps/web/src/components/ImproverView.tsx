@@ -136,19 +136,14 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
 
       {/* Input */}
       <div className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex gap-2 flex-shrink-0">
-        <input
-          ref={inputRef}
+        <textarea
+          ref={inputRef as any}
           value={input}
           onChange={e => setInput(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              handleSend()
-            }
-          }}
           placeholder="Reply to the improver..."
           disabled={loading}
-          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none disabled:opacity-50"
+          rows={1}
+          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[200px] [field-sizing:content]"
         />
         <button
           onClick={handleSend}
