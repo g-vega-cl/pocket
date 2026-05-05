@@ -14,6 +14,7 @@ export function usePocketSession(sessionId: string | null) {
     error: null,
     lastSeq: 0,
     tokenUsage: null,
+    contextWindow: 128000,
   })
   const [session, setSession] = useState<SessionDetail | null>(null)
   const [sessions, setSessions] = useState<SessionListItem[]>([])

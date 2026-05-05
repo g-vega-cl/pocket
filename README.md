@@ -186,16 +186,10 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 ## TODO - ROADMAP
 
-- [x] better virtualization
-- [x] pre-set up repo with instructions in `README.md`
-- [ ] add wrap in my input chat so I can see three lines of text. we can make it scrollable, is this a good practice? <textarea>?
 - [ ] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.
 - [ ] Take inspiration from Bolt.diy and https://github.com/Gitlawb/openclaude
 - [ ] Pocket: after thinking block is finished, hide it automatically and add a little collapsible to show it back if the user wants
-- [x] Pocket: confirm containerized and be more aggressive with allowing commands inside container
-- [x] Pocket: deterministic watchdog (HealthMonitor) for stall/loop/babble — no LLM, all code
 - [ ] Pocket: allow local models and local model calculator and ranking based on ollama models?
-- [ ] Pocket add context length? And maybe a compress?
-- [ ] Show context length in the UI.
+- [ ] And maybe a compress? - Or it might be better to just stop the convo once it gets too long? - Ask the user to retry or make a new prompt to start again with? - Isn't that basically the compress?
 - [ ] Pocket: Change to backup model mid convo? Could probing LLM do this for you? Audit response beforehand?
 - [ ] Pocket: check if you can use commands in your server like supabase

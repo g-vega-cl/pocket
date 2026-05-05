@@ -631,17 +631,37 @@ Send a `: heartbeat\n\n` SSE comment every 15 seconds. This keeps Cloudflare's t
 
 ---
 
-## 9. Token cap (your chosen alternative to compaction)
+## 9. Token cap and context indicator
 
-Per your decision: no compaction pipeline in v1. Instead:
+Per your decision: no compaction pipeline in v1. Instead, a multi-layer approach:
+
+### Always-visible context indicator
+
+The session header always shows a context usage badge with a thin progress bar:
 
 ```
-On every turn boundary:
-  estimatedTokens = countTokens(messageHistory)
-  if estimatedTokens > model.contextWindow * 0.75:
-    emit `status: warning, message: 'Approaching context limit'`
-  if estimatedTokens > model.contextWindow * 0.90:
-    block further user messages, surface "Start fresh" CTA
+ ┌─────────────────────────────────────────────┐
+ │ ● ready   ████░░░░░░░░  12,345 / 128,000   │
+ └─────────────────────────────────────────────┘
+```
+
+- Shows `total / contextWindow` tokens with a progress bar
+- Color-coded by ratio: green (<50%), yellow (<75%), orange (<90%), red (>=90%)
+- Tooltip on hover shows prompt/completion breakdown
+- Renders immediately at session start (0 / N) via an initial `token_usage` event
+
+The client never needs its own model→contextWindow mapping — the server sends `contextWindow` in every `token_usage` SSE event, looked up from the model capabilities map in `OpenRouterProvider`.
+
+### Pre-flight context check
+
+On every turn boundary, before calling the LLM:
+
+```
+estimatedTokens = countTokens(messageHistory)
+if estimatedTokens > model.contextWindow * 0.75:
+  emit `status: warning, message: 'Approaching context limit'`
+if estimatedTokens > model.contextWindow * 0.90:
+  block further user messages, surface "Start fresh" CTA
 ```
 
 ### `/new-session-with-context` command

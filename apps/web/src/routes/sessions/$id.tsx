@@ -28,22 +28,37 @@ export const Route = createFileRoute('/sessions/$id')({
   component: SessionChatView,
 })
 
-function TokenBadge({ tokenUsage }: { tokenUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | null }) {
-  if (!tokenUsage) return null
+function TokenBadge({ tokenUsage, contextWindow: cw }: { tokenUsage: { promptTokens: number; completionTokens: number; totalTokens: number; contextWindow: number } | null; contextWindow: number }) {
+  const total = tokenUsage?.totalTokens ?? 0
+  const contextWindow = tokenUsage?.contextWindow ?? cw
+  const ratio = contextWindow > 0 ? total / contextWindow : 0
+  const pct = Math.round(ratio * 100)
 
-  const displayTotal = tokenUsage.totalTokens.toLocaleString()
-  const color = tokenUsage.totalTokens > 100000
+  const color = ratio >= 0.9
     ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
-    : tokenUsage.totalTokens > 50000
-      ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
-      : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+    : ratio >= 0.75
+      ? 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
+      : ratio >= 0.5
+        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
+        : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+
+  const barColor = ratio >= 0.9
+    ? 'bg-red-500'
+    : ratio >= 0.75
+      ? 'bg-orange-500'
+      : ratio >= 0.5
+        ? 'bg-yellow-500'
+        : 'bg-[#4FB8B2]'
 
   return (
     <span
-      className={`text-xs px-2 py-0.5 rounded-full font-medium ${color}`}
-      title={`Prompt: ${tokenUsage.promptTokens.toLocaleString()} | Completion: ${tokenUsage.completionTokens.toLocaleString()} | Total: ${displayTotal}`}
+      className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium ${color}`}
+      title={`Prompt: ${tokenUsage?.promptTokens.toLocaleString() ?? '—'} | Completion: ${tokenUsage?.completionTokens.toLocaleString() ?? '—'} | Total: ${total.toLocaleString()} / ${contextWindow.toLocaleString()}`}
     >
-      {displayTotal} tokens
+      <span className="w-12 h-1.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden inline-block">
+        <span className={`h-full ${barColor} rounded-full block transition-all`} style={{ width: `${Math.min(pct, 100)}%` }} />
+      </span>
+      <span>{total.toLocaleString()} / {contextWindow.toLocaleString()}</span>
     </span>
   )
 }
@@ -161,7 +176,7 @@ function PermissionPrompt({
 function SessionChatView() {
   const { id } = Route.useParams()
   const {
-    messages, pendingPermissions, status, isThinking, error, tokenUsage,
+    messages, pendingPermissions, status, isThinking, error, tokenUsage, contextWindow,
     connected, session, sendMessage, abort, resolvePermission, loadSession,
   } = usePocketSession(id)
 
@@ -188,7 +203,7 @@ function SessionChatView() {
       {/* Header */}
       <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 flex-shrink-0">
         <StatusBadge status={status} isThinking={isThinking} />
-        <TokenBadge tokenUsage={tokenUsage} />
+        <TokenBadge tokenUsage={tokenUsage} contextWindow={contextWindow} />
         <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} title={connected ? 'Connected' : 'Disconnected'} />
         {session && (
           <span className="text-sm text-gray-600 dark:text-gray-400 truncate">

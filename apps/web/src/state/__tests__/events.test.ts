@@ -158,6 +158,27 @@ describe('reduceEvents', () => {
     expect(state.isThinking).toBe(false)
   })
 
+  it('should process token_usage event with contextWindow', () => {
+    const state = reduceEvents([
+      ev({ type: 'token_usage', seq: 1, payload: { promptTokens: 50, completionTokens: 30, totalTokens: 80, contextWindow: 128000 } }),
+    ])
+    expect(state.tokenUsage).toEqual({
+      promptTokens: 50,
+      completionTokens: 30,
+      totalTokens: 80,
+      contextWindow: 128000,
+    })
+    expect(state.contextWindow).toBe(128000)
+  })
+
+  it('should default contextWindow when token_usage lacks it', () => {
+    const state = reduceEvents([
+      ev({ type: 'token_usage', seq: 1, payload: { promptTokens: 10, completionTokens: 5, totalTokens: 15 } }),
+    ])
+    expect(state.tokenUsage?.contextWindow).toBe(128000)
+    expect(state.contextWindow).toBe(128000)
+  })
+
   it('should maintain max seq', () => {
     const state = reduceEvents([
       ev({ type: 'user_message', seq: 5, payload: { content: 'Hi' } }),

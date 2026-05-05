@@ -123,6 +123,18 @@ export class AgentRunner {
       payload: { status: 'working' },
     })
 
+    // Emit initial token usage so the UI shows 0/contextWindow immediately
+    const contextWindow = this.provider.capabilities(this.model).contextWindow
+    this.emit({
+      type: 'token_usage',
+      payload: {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        contextWindow,
+      },
+    })
+
     let turnCount = 0
 
     try {
@@ -190,6 +202,7 @@ export class AgentRunner {
               promptTokens: (usageResult as any).promptTokens ?? 0,
               completionTokens: (usageResult as any).completionTokens ?? 0,
               totalTokens: (usageResult as any).totalTokens ?? 0,
+              contextWindow: this.provider.capabilities(this.model).contextWindow,
             },
           })
         }

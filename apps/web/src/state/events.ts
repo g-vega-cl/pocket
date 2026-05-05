@@ -38,6 +38,7 @@ export interface TokenUsage {
   promptTokens: number
   completionTokens: number
   totalTokens: number
+  contextWindow: number
 }
 
 export interface ChatState {
@@ -48,6 +49,7 @@ export interface ChatState {
   error: string | null
   lastSeq: number
   tokenUsage: TokenUsage | null
+  contextWindow: number
 }
 
 function makeId(): string {
@@ -86,6 +88,7 @@ export function reduceEvents(events: Event[]): ChatState {
     error: null,
     lastSeq: 0,
     tokenUsage: null,
+    contextWindow: 128000,
   }
 
   let currentAssistantContent = ''
@@ -224,7 +227,9 @@ export function reduceEvents(events: Event[]): ChatState {
           promptTokens: Number(event.payload.promptTokens ?? 0),
           completionTokens: Number(event.payload.completionTokens ?? 0),
           totalTokens: Number(event.payload.totalTokens ?? 0),
+          contextWindow: Number(event.payload.contextWindow ?? state.contextWindow),
         }
+        state.contextWindow = state.tokenUsage.contextWindow
         break
 
       case 'status': {
