@@ -105,9 +105,11 @@ export function reduceEvents(events: Event[]): ChatState {
             content: currentAssistantContent,
             reasoning: currentReasoning || undefined,
             timestamp: Date.now(),
+            model: currentModel,
           })
           currentAssistantContent = ''
           currentReasoning = ''
+          currentModel = undefined
           hasStreamingAssistant = false
         }
         state.messages.push({

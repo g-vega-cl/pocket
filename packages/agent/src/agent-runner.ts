@@ -156,14 +156,14 @@ export class AgentRunner {
             assistantText += chunk.text
             this.emit({
               type: 'assistant_text_delta',
-              payload: { text: chunk.text, model: actualModel },
+              payload: { text: chunk.text },
             })
           } else if (chunk.type === 'reasoning' && chunk.reasoning) {
             reasoning += chunk.reasoning
             // Reasoning is emitted as text delta with reasoning field
             this.emit({
               type: 'assistant_text_delta',
-              payload: { text: '', reasoning: chunk.reasoning, model: actualModel },
+              payload: { text: '', reasoning: chunk.reasoning },
             })
           } else if (chunk.type === 'tool_call' && chunk.toolCall) {
             const tc = chunk.toolCall

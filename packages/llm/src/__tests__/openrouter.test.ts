@@ -201,6 +201,168 @@ describe('OpenRouterProvider', () => {
     expect(reasoningChunks.length).toBeGreaterThan(0)
   })
 
+  it('should capture actual model from SSE parsed.model field', async () => {
+    const sseLines = [
+      'data: {"id":"chatcmpl-1","model":"deepseek/deepseek-chat","choices":[{"delta":{"content":"Hello"}}]}',
+      'data: {"id":"chatcmpl-2","model":"deepseek/deepseek-chat","choices":[{"delta":{"content":" world"}}]}',
+      'data: {"id":"chatcmpl-3","model":"deepseek/deepseek-chat","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}',
+      'data: [DONE]',
+    ]
+
+    const mockStream = createSSEStream(sseLines)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: mockStream,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    } as Response)
+
+    const req: ChatRequest = {
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Say hello' }],
+    }
+
+    const chunks: LLMChunk[] = []
+    for await (const chunk of provider.streamChat(req)) {
+      chunks.push(chunk)
+    }
+
+    const textChunks = chunks.filter(c => c.type === 'text')
+    expect(textChunks.length).toBeGreaterThan(0)
+    for (const c of textChunks) {
+      expect(c.model).toBe('deepseek/deepseek-chat')
+    }
+  })
+
+  it('should handle fallback model from SSE', async () => {
+    const sseLines = [
+      'data: {"id":"chatcmpl-1","model":"minimax/minimax-m2.5","choices":[{"delta":{"content":"Fallback"}}]}',
+      'data: {"id":"chatcmpl-2","model":"minimax/minimax-m2.5","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}',
+      'data: [DONE]',
+    ]
+
+    const mockStream = createSSEStream(sseLines)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: mockStream,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    } as Response)
+
+    const req: ChatRequest = {
+      model: 'deepseek/deepseek-chat',
+      messages: [{ role: 'user', content: 'Hi' }],
+    }
+
+    const chunks: LLMChunk[] = []
+    for await (const chunk of provider.streamChat(req)) {
+      chunks.push(chunk)
+    }
+
+    const textChunks = chunks.filter(c => c.type === 'text')
+    expect(textChunks.length).toBeGreaterThan(0)
+    expect(textChunks[0].model).toBe('minimax/minimax-m2.5')
+  })
+
+  it('should include model on tool_call chunks', async () => {
+    const sseLines = [
+      'data: {"id":"chatcmpl-1","model":"deepseek/deepseek-chat","choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"read_file","arguments":"{\\"path\\":\\"foo.txt\\"}"}}]}}]}',
+      'data: {"id":"chatcmpl-2","model":"deepseek/deepseek-chat","choices":[{"finish_reason":"tool_calls"}]}',
+      'data: [DONE]',
+    ]
+
+    const mockStream = createSSEStream(sseLines)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: mockStream,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    } as Response)
+
+    const req: ChatRequest = {
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Read file' }],
+      tools: [{
+        type: 'function',
+        function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } },
+      }],
+    }
+
+    const chunks: LLMChunk[] = []
+    for await (const chunk of provider.streamChat(req)) {
+      chunks.push(chunk)
+    }
+
+    const toolChunks = chunks.filter(c => c.type === 'tool_call')
+    expect(toolChunks.length).toBeGreaterThanOrEqual(1)
+    for (const c of toolChunks) {
+      expect(c.model).toBe('deepseek/deepseek-chat')
+    }
+  })
+
+  it('should not set model when SSE has no model field', async () => {
+    const sseLines = [
+      'data: {"id":"chatcmpl-1","choices":[{"delta":{"content":"No model"}}]}',
+      'data: {"id":"chatcmpl-2","choices":[{"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}',
+      'data: [DONE]',
+    ]
+
+    const mockStream = createSSEStream(sseLines)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: mockStream,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    } as Response)
+
+    const req: ChatRequest = {
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hi' }],
+    }
+
+    const chunks: LLMChunk[] = []
+    for await (const chunk of provider.streamChat(req)) {
+      chunks.push(chunk)
+    }
+
+    const textChunks = chunks.filter(c => c.type === 'text')
+    expect(textChunks.length).toBeGreaterThan(0)
+    expect(textChunks[0].model).toBeUndefined()
+  })
+
+  it('should include model on reasoning chunks', async () => {
+    const sseLines = [
+      'data: {"id":"chatcmpl-1","model":"deepseek/deepseek-chat","choices":[{"delta":{"reasoning":"Let me think..."}}]}',
+      'data: {"id":"chatcmpl-2","model":"deepseek/deepseek-chat","choices":[{"delta":{"content":"Answer"}}]}',
+      'data: {"id":"chatcmpl-3","model":"deepseek/deepseek-chat","choices":[{"finish_reason":"stop"}]}',
+      'data: [DONE]',
+    ]
+
+    const mockStream = createSSEStream(sseLines)
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      body: mockStream,
+      headers: new Headers({ 'content-type': 'text/event-stream' }),
+    } as Response)
+
+    const req: ChatRequest = {
+      model: 'deepseek/deepseek-chat',
+      messages: [{ role: 'user', content: 'Think' }],
+    }
+
+    const chunks: LLMChunk[] = []
+    for await (const chunk of provider.streamChat(req)) {
+      chunks.push(chunk)
+    }
+
+    const reasoningChunks = chunks.filter(c => c.type === 'reasoning')
+    expect(reasoningChunks.length).toBeGreaterThan(0)
+    for (const c of reasoningChunks) {
+      expect(c.model).toBe('deepseek/deepseek-chat')
+    }
+  })
+
   it('should throw on HTTP error', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: false,

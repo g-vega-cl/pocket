@@ -609,4 +609,115 @@ describe('AgentRunner', () => {
     expect(msg3[6].role).toBe('tool')
     expect(msg3[6].tool_call_id).toBe('call_3')
   })
+
+  describe('model tracking', () => {
+    it('should include model from chunks in assistant_text_done', async () => {
+      const provider = makeMockProvider()
+      provider.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        yield { type: 'text', text: 'Hello', model: 'deepseek/deepseek-chat' }
+        return { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+      })
+
+      const runner = new AgentRunner({
+        sessionId: 'sess_test',
+        provider: provider as any,
+        eventLog,
+        tools: registry,
+        model: 'openai/gpt-4o',
+        onEvent: (event) => capturedEvents.push(event),
+        systemPrompt: 'Helper',
+      })
+
+      await runner.runTurn({ role: 'user', content: 'Hi' })
+
+      const doneEvent = capturedEvents.find(e => e.type === 'assistant_text_done')
+      expect(doneEvent).toBeDefined()
+      expect(doneEvent!.payload.model).toBe('deepseek/deepseek-chat')
+    })
+
+    it('should fall back to requested model in assistant_text_done when no actual model reported', async () => {
+      const provider = makeMockProvider()
+      provider.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        yield { type: 'text', text: 'Hello' }
+        return { promptTokens: 5, completionTokens: 2, totalTokens: 7 }
+      })
+
+      const runner = new AgentRunner({
+        sessionId: 'sess_test',
+        provider: provider as any,
+        eventLog,
+        tools: registry,
+        model: 'deepseek/deepseek-chat',
+        onEvent: (event) => capturedEvents.push(event),
+        systemPrompt: 'Helper',
+      })
+
+      await runner.runTurn({ role: 'user', content: 'Hi' })
+
+      const doneEvent = capturedEvents.find(e => e.type === 'assistant_text_done')
+      expect(doneEvent).toBeDefined()
+      expect(doneEvent!.payload.model).toBe('deepseek/deepseek-chat')
+    })
+
+    it('should not include model in assistant_text_delta events', async () => {
+      const provider = makeMockProvider()
+      provider.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        yield { type: 'text', text: 'Hello', model: 'deepseek/deepseek-chat' }
+        yield { type: 'text', text: ' world', model: 'deepseek/deepseek-chat' }
+        return { promptTokens: 10, completionTokens: 5, totalTokens: 15 }
+      })
+
+      const runner = new AgentRunner({
+        sessionId: 'sess_test',
+        provider: provider as any,
+        eventLog,
+        tools: registry,
+        model: 'openai/gpt-4o',
+        onEvent: (event) => capturedEvents.push(event),
+        systemPrompt: 'Helper',
+      })
+
+      await runner.runTurn({ role: 'user', content: 'Hi' })
+
+      const deltaEvents = capturedEvents.filter(e => e.type === 'assistant_text_delta')
+      expect(deltaEvents.length).toBeGreaterThan(0)
+      for (const evt of deltaEvents) {
+        expect(evt.payload.model).toBeUndefined()
+      }
+    })
+
+    it('should reset model between turns', async () => {
+      const provider = makeMockProvider()
+      let callCount = 0
+      provider.streamChat.mockImplementation(async function* (): AsyncGenerator<LLMChunk, ChatUsage> {
+        callCount++
+        if (callCount === 1) {
+          yield { type: 'text', text: 'First', model: 'deepseek/deepseek-chat' }
+          return { promptTokens: 5, completionTokens: 2, totalTokens: 7 }
+        }
+        yield { type: 'text', text: 'Second', model: 'minimax/minimax-m2.5' }
+        return { promptTokens: 5, completionTokens: 2, totalTokens: 7 }
+      })
+
+      const runner = new AgentRunner({
+        sessionId: 'sess_test',
+        provider: provider as any,
+        eventLog,
+        tools: registry,
+        model: 'openai/gpt-4o',
+        onEvent: (event) => capturedEvents.push(event),
+        systemPrompt: 'Helper',
+      })
+
+      // First turn with deepseek
+      await runner.runTurn({ role: 'user', content: 'First msg' })
+      // Second turn with minimax
+      await runner.runTurn({ role: 'user', content: 'Second msg' })
+
+      const doneEvents = capturedEvents.filter(e => e.type === 'assistant_text_done')
+      expect(doneEvents).toHaveLength(2)
+      expect(doneEvents[0].payload.model).toBe('deepseek/deepseek-chat')
+      expect(doneEvents[1].payload.model).toBe('minimax/minimax-m2.5')
+    })
+  })
 })

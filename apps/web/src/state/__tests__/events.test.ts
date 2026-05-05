@@ -165,4 +165,73 @@ describe('reduceEvents', () => {
     ])
     expect(state.lastSeq).toBe(10)
   })
+
+  describe('model tracking', () => {
+    it('should capture model from assistant_text_delta and store it on the message', () => {
+      const state = reduceEvents([
+        ev({ type: 'user_message', seq: 1, payload: { content: 'Hi' } }),
+        ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'Hello', model: 'deepseek/deepseek-chat' } }),
+        ev({ type: 'assistant_text_delta', seq: 3, payload: { text: ' world', model: 'deepseek/deepseek-chat' } }),
+        ev({ type: 'assistant_text_done', seq: 4, payload: { text: 'Hello world', model: 'deepseek/deepseek-chat' } }),
+      ])
+      expect(state.messages).toHaveLength(2)
+      expect(state.messages[1].model).toBe('deepseek/deepseek-chat')
+    })
+
+    it('should capture model from assistant_text_done even when deltas have no model', () => {
+      const state = reduceEvents([
+        ev({ type: 'user_message', seq: 1, payload: { content: 'Hi' } }),
+        ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'Hello' } }),
+        ev({ type: 'assistant_text_done', seq: 3, payload: { text: 'Hello', model: 'minimax/minimax-m2.5' } }),
+      ])
+      expect(state.messages).toHaveLength(2)
+      expect(state.messages[1].model).toBe('minimax/minimax-m2.5')
+    })
+
+    it('should reset model between assistant responses', () => {
+      const state = reduceEvents([
+        ev({ type: 'user_message', seq: 1, payload: { content: 'Hi' } }),
+        ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'First', model: 'deepseek/deepseek-chat' } }),
+        ev({ type: 'assistant_text_done', seq: 3, payload: { text: 'First', model: 'deepseek/deepseek-chat' } }),
+        ev({ type: 'user_message', seq: 4, payload: { content: 'Again' } }),
+        ev({ type: 'assistant_text_delta', seq: 5, payload: { text: 'Second', model: 'minimax/minimax-m2.5' } }),
+        ev({ type: 'assistant_text_done', seq: 6, payload: { text: 'Second', model: 'minimax/minimax-m2.5' } }),
+      ])
+      expect(state.messages).toHaveLength(4)
+      expect(state.messages[1].model).toBe('deepseek/deepseek-chat')
+      expect(state.messages[3].model).toBe('minimax/minimax-m2.5')
+    })
+
+    it('should include model when user_message flush occurs mid-stream', () => {
+      const state = reduceEvents([
+        ev({ type: 'user_message', seq: 1, payload: { content: 'Hi' } }),
+        ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'Partial', model: 'deepseek/deepseek-chat' } }),
+        // user_message arrives before assistant_text_done — should flush with model
+        ev({ type: 'user_message', seq: 3, payload: { content: 'Interrupt' } }),
+      ])
+      expect(state.messages).toHaveLength(3)
+      const flushed = state.messages[1]
+      expect(flushed.role).toBe('assistant')
+      expect(flushed.content).toBe('Partial')
+      expect(flushed.model).toBe('deepseek/deepseek-chat')
+    })
+
+    it('should include model in final flush when stream ends without assistant_text_done', () => {
+      const state = reduceEvents([
+        ev({ type: 'user_message', seq: 1, payload: { content: 'Hi' } }),
+        ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'Hello', model: 'deepseek/deepseek-chat' } }),
+      ])
+      expect(state.messages).toHaveLength(2)
+      expect(state.messages[1].model).toBe('deepseek/deepseek-chat')
+    })
+
+    it('should not set model when no model is present in events', () => {
+      const state = reduceEvents([
+        ev({ type: 'user_message', seq: 1, payload: { content: 'Hi' } }),
+        ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'Hello' } }),
+        ev({ type: 'assistant_text_done', seq: 3, payload: { text: 'Hello' } }),
+      ])
+      expect(state.messages[1].model).toBeUndefined()
+    })
+  })
 })

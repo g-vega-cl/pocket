@@ -72,7 +72,6 @@ export class OpenRouterProvider implements LLMProvider {
     let currentToolName: string | null = null
     let currentToolArgs = ''
     let usage: ChatUsage | null = null
-
     let actualModel: string | undefined
 
     try {
