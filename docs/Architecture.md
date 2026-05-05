@@ -963,16 +963,18 @@ Still open:
 
 The prompt improver is a separate mini-chat that helps users refine prompts before sending them to the main agent. It deliberately stays **outside** the event log and agent loop — only the final accepted prompt enters the session.
 
-### Design
+### Design (mobile-first full-view transition)
+
+The improver is a **full-view replacement**, not a modal overlay. When the user taps **✨ Improve**, the main chat view is completely replaced by the improver view — only one view is visible at a time. This avoids the "double chat" feeling and eliminates nested scroll containers that break on mobile.
 
 ```
 User types draft → clicks ✨ Improve
       │
       ▼
-ImproverModal (React, client-side state)
+Main chat view replaced by ImproverView (full-page, same layout)
       │
       ▼
-POST /api/sessions/:id/improve   { draft, conversation[] }
+Auto-sends POST /api/sessions/:id/improve   { draft, conversation: [] }
       │
       ▼
 Server: reads full session context from events.jsonl
@@ -985,13 +987,14 @@ Separate OpenRouterProvider.streamChat() call
 Returns { content, model } as JSON (non-streaming to client)
       │
       ▼
-ImproverModal shows response, user can reply, iterate
+ImproverView shows response, user can reply, iterate
       │
       ▼
 User clicks "Apply" → one final call: "produce final improved prompt"
       │
       ▼
-Improved prompt replaces the textarea → user clicks Send
+Improved prompt fills textarea → transitions back to main chat
+      │  (user can review/edit before clicking Send)
       │  (enters AgentRunner via normal POST /sessions/:id/messages)
 ```
 
@@ -1045,9 +1048,11 @@ This pure function takes `Event[]` and optional `{ systemPrompt, nudgeText }`, r
 
 ### UI
 
-The improver is a purple-themed modal (`apps/web/src/components/ImproverModal.tsx`) with:
-- Scrollable conversation showing improver messages (purple background) and user replies (teal background)
-- Text input + Send button for replies
-- **Apply Improved Prompt** button that sends a final "produce the final version" message and replaces the main textarea
-- Cancel button to close without saving
-- "✨ Improve" button in the main composer row (visible when textarea is non-empty and agent is idle)
+The improver is a full-page view (`apps/web/src/components/ImproverView.tsx`) that shares the same layout pattern as the main chat (`max-w-3xl h-[calc(100vh-4rem)] flex flex-col`). It completely replaces the chat view when active — a state toggle in `sessions/$id.tsx` switches between them. This is a mobile-first pattern: only one view and one scroll context exist at any time.
+
+Layout:
+- **Header** (`flex-shrink-0`): ← Back button + "Improve Prompt" title
+- **Conversation** (`flex-1 overflow-y-auto`): improver messages (purple background) and user replies (teal background)
+- **Input bar** (`flex-shrink-0`): text input + Send button for replies
+- **Action bar** (`flex-shrink-0`): Cancel (returns to chat, preserves draft) + **Apply Improved Prompt** (finalizes and fills textarea, then transitions back)
+- **"✨ Improve" button** in the main composer row (visible when textarea is non-empty and agent is idle)

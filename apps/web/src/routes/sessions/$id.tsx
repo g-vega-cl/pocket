@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState, useRef } from 'react'
 import { usePocketSession } from '#/hooks/usePocketSession.js'
 import { ThinkingDrawer } from '#/components/ThinkingDrawer.js'
-import { ImproverModal } from '#/components/ImproverModal.js'
+import { ImproverView } from '#/components/ImproverView.js'
 import type { PendingPermission } from '#/state/events.js'
 
 function formatMessageTime(ts: number): string {
@@ -200,6 +200,20 @@ function SessionChatView() {
     await sendMessage(input.trim())
   }
 
+  if (showImprover) {
+    return (
+      <ImproverView
+        sessionId={id}
+        draft={input}
+        onApply={(improved) => {
+          setInput(improved)
+          setShowImprover(false)
+        }}
+        onBack={() => setShowImprover(false)}
+      />
+    )
+  }
+
   return (
     <div className="max-w-3xl mx-auto h-[calc(100vh-4rem)] flex flex-col">
       {/* Header */}
@@ -353,18 +367,6 @@ function SessionChatView() {
           </button>
         )}
       </form>
-
-      {showImprover && (
-        <ImproverModal
-          sessionId={id}
-          draft={input}
-          onApply={(improved) => {
-            setInput(improved)
-            setShowImprover(false)
-          }}
-          onClose={() => setShowImprover(false)}
-        />
-      )}
     </div>
   )
 }
