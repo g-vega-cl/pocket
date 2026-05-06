@@ -1,6 +1,6 @@
 # Pocket — Architecture (v1)
 
-> A self-hosted coding agent you drive from your phone. The server runs on your home machine and exposes a tunneled web client. The agent works on your repos, opens PRs, and keeps going while your phone is locked.
+> A mobile-first, self-hosted coding agent you drive from your phone. The server runs on your home machine and exposes a tunneled web client. The agent works on your repos, opens PRs, and keeps going while your phone is locked.
 >
 > **Status: implemented.** This document describes the system as built. Sections marked `[plan]` were design rationale written before implementation.
 
@@ -10,6 +10,7 @@
 
 These are not platitudes — every decision in this doc traces back to one of them.
 
+0. **Mobile-first.** The phone is the primary interface. Every UX decision — permissions as a review queue not a blocking modal, SSE auto-reconnect on screen lock, offline-resilient event replay, the "Resume" button for crash recovery — is designed for phone use first, desktop as a bonus.
 1. **The server is the source of truth.** The client is a window into it. Closing the tab must never stop the agent or lose state.
 2. **Append-only, replayable.** Sessions are an event log on disk. Anything the client missed can be replayed. This is how reconnection becomes a non-feature.
 3. **The agent loop is small. The systems around it are large.** Following Claude Code's design: a 50-line `while` loop calls the model and runs tools. Permissions, persistence, and recovery live in the systems around it.

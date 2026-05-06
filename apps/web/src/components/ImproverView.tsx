@@ -20,8 +20,24 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const conversationEndRef = useRef<HTMLDivElement>(null)
+  const restoredRef = useRef(false)
 
   useEffect(() => {
+    const convKey = `pocket:improver:${sessionId}:conversation`
+    try {
+      const saved = localStorage.getItem(convKey)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setConversation(parsed)
+          restoredRef.current = true
+          setLoading(false)
+          return
+        }
+      }
+    } catch {
+      // corrupted data, start fresh
+    }
     makeImproveCall(draft, [])
   }, [])
 
@@ -32,6 +48,19 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
   useEffect(() => {
     if (!loading) inputRef.current?.focus()
   }, [loading])
+
+  useEffect(() => {
+    if (conversation.length > 0) {
+      try {
+        localStorage.setItem(
+          `pocket:improver:${sessionId}:conversation`,
+          JSON.stringify(conversation)
+        )
+      } catch {
+        // localStorage full or unavailable
+      }
+    }
+  }, [conversation, sessionId])
 
   const makeImproveCall = useCallback(async (userMessage: string, prevConversation: ImproverMessage[]) => {
     setLoading(true)

@@ -1,6 +1,6 @@
 # Pocket
 
-A self-hosted coding agent you drive from your phone. The server runs on your home machine and exposes a tunneled web client. The agent works on your repos, opens PRs, and keeps going while your phone is locked.
+A mobile-first, self-hosted coding agent you drive from your phone. The server runs on your home machine and exposes a tunneled web client. The agent works on your repos, opens PRs, and keeps going while your phone is locked.
 
 ## Architecture
 
@@ -22,6 +22,7 @@ pocket/
 
 ### Key principles
 
+- **Mobile-first design.** The phone is the primary interface. Every UX choice — permissions as a review queue, SSE reconnect on screen lock, offline-resilient event replay — is designed for phone use first, desktop as a bonus.
 - **The server is the source of truth.** Closing the tab never stops the agent.
 - **Append-only event log.** Sessions are JSONL on disk. Reconnection is replay, not reconnect.
 - **Permissions over prompts.** Sensible auto-allow defaults so the agent keeps going.

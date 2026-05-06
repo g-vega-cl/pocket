@@ -181,8 +181,9 @@ function SessionChatView() {
     connected, session, sendMessage, abort, resolvePermission, loadSession,
   } = usePocketSession(id)
 
-  const [input, setInput] = useState('')
-  const [showImprover, setShowImprover] = useState(false)
+  const storagePrefix = `pocket:improver:${id}`
+  const [input, setInput] = useState(() => localStorage.getItem(`${storagePrefix}:draft`) ?? '')
+  const [showImprover, setShowImprover] = useState(() => localStorage.getItem(`${storagePrefix}:active`) === '1')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -200,6 +201,12 @@ function SessionChatView() {
     await sendMessage(input.trim())
   }
 
+  function clearImproverStorage() {
+    localStorage.removeItem(`${storagePrefix}:active`)
+    localStorage.removeItem(`${storagePrefix}:draft`)
+    localStorage.removeItem(`${storagePrefix}:conversation`)
+  }
+
   if (showImprover) {
     return (
       <ImproverView
@@ -207,9 +214,13 @@ function SessionChatView() {
         draft={input}
         onApply={(improved) => {
           setInput(improved)
+          clearImproverStorage()
           setShowImprover(false)
         }}
-        onBack={() => setShowImprover(false)}
+        onBack={() => {
+          clearImproverStorage()
+          setShowImprover(false)
+        }}
       />
     )
   }
@@ -343,7 +354,11 @@ function SessionChatView() {
         {!isThinking && input.trim() && (
           <button
             type="button"
-            onClick={() => setShowImprover(true)}
+            onClick={() => {
+              localStorage.setItem(`${storagePrefix}:active`, '1')
+              localStorage.setItem(`${storagePrefix}:draft`, input)
+              setShowImprover(true)
+            }}
             className="px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
           >
             ✨ Improve
