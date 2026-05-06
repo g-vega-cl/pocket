@@ -108,7 +108,7 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
   }
 
   return (
-    <div className="max-w-3xl mx-auto h-[calc(100dvh-2.5rem)] flex flex-col">
+    <div className="max-w-5xl mx-auto h-[calc(100dvh-2.5rem)] flex flex-col">
       {/* Header — back button + title */}
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <button
@@ -159,7 +159,7 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
       </div>
 
       {/* Input */}
-      <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 flex gap-2 flex-shrink-0">
+      <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-2 flex-shrink-0">
         <textarea
           ref={inputRef as any}
           value={input}
@@ -167,7 +167,7 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
           placeholder="Reply to the improver..."
           disabled={loading}
           rows={1}
-          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[80px] [field-sizing:content]"
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[80px] [field-sizing:content]"
         />
         <button
           onClick={handleSend}
@@ -179,7 +179,7 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
       </div>
 
       {/* Actions */}
-      <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 flex gap-2 flex-shrink-0">
+      <div className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 flex flex-col gap-2 flex-shrink-0">
         <button
           onClick={onBack}
           className="px-3 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg transition-colors"
@@ -189,7 +189,7 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
         <button
           onClick={handleApply}
           disabled={loading || conversation.length === 0}
-          className="px-3 py-2 bg-[#4FB8B2] hover:bg-[#3da39d] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors ml-auto"
+          className="px-3 py-2 bg-[#4FB8B2] hover:bg-[#3da39d] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
         >
           Apply Improved Prompt
         </button>
