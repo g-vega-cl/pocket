@@ -1,32 +1,90 @@
 import { Link } from '@tanstack/react-router'
+import { useContext } from 'react'
 import ThemeToggle from './ThemeToggle'
+import { SessionInfoContext } from '../state/session-context'
+
+function StatusBadge({ status, isThinking }: { status: string; isThinking: boolean }) {
+  const colors: Record<string, string> = {
+    creating: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
+    cloning: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
+    sandboxing: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+    ready: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+    working: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+    idle: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
+    awaiting_permission: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
+    done: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+    error: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+    interrupted: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
+  }
+  const color = colors[status] ?? colors.creating
+  const label = isThinking ? `${status} …` : status
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${color} shrink-0`}>
+      {label}
+    </span>
+  )
+}
+
+function TokenBadge({ tokenUsage, contextWindow: cw }: { tokenUsage: { promptTokens: number; completionTokens: number; totalTokens: number; contextWindow: number } | null; contextWindow: number }) {
+  const total = tokenUsage?.totalTokens ?? 0
+  const contextWindow = tokenUsage?.contextWindow ?? cw
+  const ratio = contextWindow > 0 ? total / contextWindow : 0
+
+  const color = ratio >= 0.9
+    ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+    : ratio >= 0.75
+      ? 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
+      : ratio >= 0.5
+        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
+        : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
+
+  const barColor = ratio >= 0.9
+    ? 'bg-red-500'
+    : ratio >= 0.75
+      ? 'bg-orange-500'
+      : ratio >= 0.5
+        ? 'bg-yellow-500'
+        : 'bg-[#4FB8B2]'
+
+  return (
+    <span
+      className={`inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${color} shrink-0`}
+      title={`Prompt: ${tokenUsage?.promptTokens.toLocaleString() ?? '—'} | Completion: ${tokenUsage?.completionTokens.toLocaleString() ?? '—'} | Total: ${total.toLocaleString()} / ${contextWindow.toLocaleString()}`}
+    >
+      <span className="w-8 h-1 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden inline-block">
+        <span className={`h-full ${barColor} rounded-full block transition-all`} style={{ width: `${Math.min(ratio * 100, 100)}%` }} />
+      </span>
+      <span>{total.toLocaleString()}</span>
+    </span>
+  )
+}
 
 export default function Header() {
+  const sessionInfo = useContext(SessionInfoContext)
+
   return (
-    <header className="sticky top-0 z-50 border-b border-[var(--line)] bg-[var(--header-bg)] px-4 backdrop-blur-lg">
-      <nav className="page-wrap flex flex-wrap items-center gap-x-3 gap-y-1 py-1.5 sm:py-2">
-        <h2 className="m-0 flex-shrink-0 text-sm font-semibold tracking-tight">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-2.5 py-1 text-xs text-[var(--sea-ink)] no-underline shadow-[0_4px_12px_rgba(30,90,72,0.06)] sm:px-3 sm:py-1.5"
-          >
-            <span className="h-1.5 w-1.5 rounded-full bg-[linear-gradient(90deg,#56c6be,#7ed3bf)]" />
-            Pocket
-          </Link>
-        </h2>
+    <header className="sticky top-0 z-50 border-b border-[var(--line)] bg-[var(--header-bg)] px-2 backdrop-blur-lg">
+      <nav className="flex items-center gap-1.5 py-1">
+        <Link
+          to="/"
+          className="inline-flex items-center gap-1.5 rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-2 py-0.5 text-[11px] font-semibold text-[var(--sea-ink)] no-underline shrink-0"
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-[linear-gradient(90deg,#56c6be,#7ed3bf)]" />
+          Pocket
+        </Link>
 
-        <div className="ml-auto flex items-center gap-1.5 sm:ml-0 sm:gap-2">
+        {sessionInfo && (
+          <div className="flex items-center gap-1.5 flex-1 min-w-0 ml-0.5">
+            <StatusBadge status={sessionInfo.status} isThinking={sessionInfo.isThinking} />
+            <TokenBadge tokenUsage={sessionInfo.tokenUsage} contextWindow={sessionInfo.contextWindow} />
+            <span className="text-[10px] text-[var(--sea-ink-soft)] truncate shrink">
+              {sessionInfo.sessionName}
+            </span>
+          </div>
+        )}
+
+        <div className="ml-auto shrink-0">
           <ThemeToggle />
-        </div>
-
-        <div className="order-3 flex w-full flex-wrap items-center gap-x-4 gap-y-1 pb-0.5 text-xs font-semibold sm:order-2 sm:w-auto sm:flex-nowrap sm:pb-0">
-          <Link
-            to="/"
-            className="nav-link"
-            activeProps={{ className: 'nav-link is-active' }}
-          >
-            Home
-          </Link>
         </div>
       </nav>
     </header>
