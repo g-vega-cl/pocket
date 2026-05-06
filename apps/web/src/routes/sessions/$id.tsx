@@ -217,7 +217,7 @@ function SessionChatView() {
         {/* Workspace setup progress (shown before any user messages) */}
         {messages.filter(m => m.role === 'user').length === 0 && (status === 'creating' || status === 'cloning' || status === 'ready' || status === 'working') && (
           <div className="flex justify-start">
-            <div className="max-w-[80%] bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3 text-sm text-gray-900 dark:text-gray-100 w-full">
               <div className="flex items-center gap-2 mb-2">
                 {status !== 'ready' && (
                   <svg className="animate-spin h-4 w-4 text-[#4FB8B2]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -252,7 +252,7 @@ function SessionChatView() {
             !msg.model.startsWith(session.model) && !session.model.startsWith(msg.model)
           return (
             <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`max-w-[80%] rounded-xl px-4 py-2 text-sm ${
+              <div className={`rounded-lg px-4 py-2 text-sm w-full ${
                 msg.role === 'user'
                   ? 'bg-[#4FB8B2] text-white'
                   : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
@@ -289,7 +289,7 @@ function SessionChatView() {
 
         {isThinking && (
           <div className="flex justify-start">
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-xl px-4 py-2">
+            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-2 w-full">
               <div className="flex gap-1.5">
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
                 <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
