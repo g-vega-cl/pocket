@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 config({ path: path.resolve(__dirname, '..', '..', '..', '.env') })
 
-import { SessionManager, EventLog, ToolRegistry, AgentRunner, ProcessManager, PermissionGate } from '@pocket/agent'
+import { SessionManager, EventLog, ToolRegistry, AgentRunner, ProcessManager, PermissionGate, buildConversationFromEvents } from '@pocket/agent'
 import { OpenRouterProvider } from '@pocket/llm'
 import {
   readFileTool, listFilesTool, writeFileTool, editFileTool,
@@ -28,7 +28,7 @@ import {
   stopSandboxContainer,
   ensureContainer,
 } from '@pocket/tools'
-import type { Event, PocketConfig, WatchdogConfig } from '@pocket/core'
+import type { Event, PocketConfig, WatchdogConfig, Message, ToolContext } from '@pocket/core'
 import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY, DEFAULT_WATCHDOG_CONFIG } from '@pocket/core'
 
 function getConfig(): PocketConfig {
@@ -434,6 +434,269 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
     })
 
     return { ok: true, sessionId: id }
+  })
+
+  // Prompt improvement — separate LLM call, does NOT write to event log
+  app.post('/api/sessions/:id/improve', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const { draft, conversation } = request.body as {
+      draft: string
+      conversation?: Array<{ role: 'user' | 'assistant'; content: string }>
+    }
+
+    const session = sessionManager.getSession(id)
+    if (!session) {
+      return reply.status(404).send({ error: 'Session not found' })
+    }
+
+    if (!draft || !draft.trim()) {
+      return reply.status(400).send({ error: 'draft is required' })
+    }
+
+    const apiKey = options.env?.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY
+    if (!apiKey) {
+      return reply.status(500).send({ error: 'OPENROUTER_API_KEY not configured' })
+    }
+
+    const provider = new OpenRouterProvider({ apiKey })
+
+    // Get full session context from the event log (includes tool calls + results)
+    const events = eventLog.replaySync(id)
+    const sessionMsgs = buildConversationFromEvents(events)
+
+    const contextLines = sessionMsgs
+      .map(m => {
+        if (m.role === 'system') return null
+        if (m.tool_calls && m.tool_calls.length > 0) {
+          const toolNames = m.tool_calls.map(tc => tc.function.name).join(', ')
+          return `Agent (used tools: ${toolNames}): ${m.content || ''}`
+        }
+        if (m.tool_call_id && m.content) {
+          const truncated = m.content.length > 1500 ? m.content.slice(0, 1500) + '...' : m.content
+          let parsed: string
+          try {
+            const obj = JSON.parse(truncated)
+            parsed = JSON.stringify(obj)
+          } catch {
+            parsed = truncated
+          }
+          return `[Tool result]: ${parsed}`
+        }
+        return `${m.role === 'user' ? 'User' : 'Agent'}: ${m.content || ''}`
+      })
+      .filter(Boolean)
+      .join('\n\n')
+
+    const improverSystemPrompt = `You are a prompt improvement assistant working inside Pocket, a coding agent.
+Your job is to help the user write better prompts for their coding session.
+
+You have access to:
+1. The full conversation history of this session (including all tool calls and their results)
+2. Read-only tools to explore the codebase: read_file, list_files, glob, grep, web_fetch, web_search, git_status, git_log, git_diff
+
+Use these tools to understand the codebase before improving the prompt. When the user shares a draft:
+1. FIRST, explore the codebase to gather relevant context (read relevant files, check git status, search for patterns)
+2. If the draft is vague or missing important details, ask up to 3 specific clarifying questions
+3. If the draft is already clear, produce an improved version directly (more specific, actionable, context-aware)
+4. When explicitly asked to finalize, output ONLY the final improved prompt text with no other commentary
+
+Be concise and direct. Focus on making the prompt more specific, actionable, and context-aware given the session's state and codebase.`
+
+    const messages: Message[] = [
+      { role: 'system', content: improverSystemPrompt },
+    ]
+
+    if (contextLines) {
+      messages.push({
+        role: 'system',
+        content: `=== SESSION CONTEXT (conversation history) ===\n\n${contextLines}`,
+      })
+    }
+
+    // Include previous improver conversation
+    if (conversation && conversation.length > 0) {
+      for (const msg of conversation) {
+        messages.push({ role: msg.role, content: msg.content })
+      }
+    }
+
+    // Include the current draft
+    const isFirstTurn = !conversation || conversation.length === 0
+    messages.push({
+      role: 'user',
+      content: isFirstTurn
+        ? `The user wants to improve this draft prompt. Please help refine it:\n\n"${draft}"`
+        : draft,
+    })
+
+    // Build read-only tool registry for the improver
+    const readOnlyRegistry = new ToolRegistry()
+    readOnlyRegistry.register(readFileTool)
+    readOnlyRegistry.register(listFilesTool)
+    readOnlyRegistry.register(globTool)
+    readOnlyRegistry.register(grepTool)
+    readOnlyRegistry.register(webFetchTool)
+    readOnlyRegistry.register(webSearchTool)
+    readOnlyRegistry.register(gitStatusTool)
+    readOnlyRegistry.register(gitLogTool)
+    readOnlyRegistry.register(gitDiffTool)
+
+    const readOnlyToolDefs = readOnlyRegistry.toDefinitions()
+    const workspaceRoot = session.localPath
+
+    const toolCtx: ToolContext | null = workspaceRoot ? {
+      sessionId: id,
+      workspaceRoot,
+      githubToken: session.githubToken,
+      sandboxImage: session.sandboxImage,
+      resolvePath: (inputPath: string) => {
+        const resolved = path.resolve(workspaceRoot, inputPath)
+        if (!resolved.startsWith(workspaceRoot)) {
+          throw new Error(`Path escapes workspace: ${inputPath}`)
+        }
+        return resolved
+      },
+    } : null
+
+    try {
+      let finalContent: string | null = null
+      let actualModel: string | undefined
+      const MAX_TOOL_TURNS = 5
+
+      for (let turn = 0; turn < MAX_TOOL_TURNS && finalContent === null; turn++) {
+        const stream = provider.streamChat({
+          model: session.model,
+          messages,
+          tools: readOnlyToolDefs.length > 0 ? readOnlyToolDefs : undefined,
+        })
+
+        let assistantText = ''
+        const toolCalls: Array<{ id: string; name: string; arguments: string }> = []
+
+        let streamResult = await stream.next()
+        while (!streamResult.done) {
+          const chunk = streamResult.value
+          if (chunk.model) actualModel = chunk.model
+          if (chunk.type === 'text' && chunk.text) {
+            assistantText += chunk.text
+          } else if (chunk.type === 'tool_call' && chunk.toolCall) {
+            toolCalls.push(chunk.toolCall)
+          }
+          streamResult = await stream.next()
+        }
+
+        if (toolCalls.length === 0) {
+          finalContent = assistantText
+          break
+        }
+
+        // Add assistant message with tool calls
+        messages.push({
+          role: 'assistant',
+          content: assistantText || null,
+          tool_calls: toolCalls.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        })
+
+        // Execute tools and add results
+        for (const tc of toolCalls) {
+          if (!toolCtx) {
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ error: 'No workspace available (session not fully initialized)' }),
+            })
+            continue
+          }
+
+          const tool = readOnlyRegistry.get(tc.name)
+          if (!tool) {
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ error: `Unknown tool: ${tc.name}` }),
+            })
+            continue
+          }
+
+          let args: Record<string, unknown>
+          try {
+            args = JSON.parse(tc.arguments)
+          } catch {
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ error: `Invalid JSON arguments: ${tc.arguments}` }),
+            })
+            continue
+          }
+
+          const validation = tool.inputSchema.safeParse(args)
+          if (!validation.success) {
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ error: `Invalid arguments: ${validation.error.message}` }),
+            })
+            continue
+          }
+
+          try {
+            const gen = tool.call(validation.data, toolCtx)
+            let lastResult = await gen.next()
+            while (!lastResult.done) {
+              lastResult = await gen.next()
+            }
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: typeof lastResult.value === 'string'
+                ? lastResult.value
+                : JSON.stringify({ result: lastResult.value }),
+            })
+          } catch (error) {
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+            })
+          }
+        }
+      }
+
+      // If we exhausted all turns without a text response, force a final text-only call
+      if (finalContent === null) {
+        messages.push({
+          role: 'user',
+          content: 'Please provide your final response based on what you have explored.',
+        })
+
+        const finalStream = provider.streamChat({
+          model: session.model,
+          messages,
+        })
+
+        let text = ''
+        let finalStreamResult = await finalStream.next()
+        while (!finalStreamResult.done) {
+          const chunk = finalStreamResult.value
+          if (chunk.type === 'text' && chunk.text) {
+            text += chunk.text
+          }
+          finalStreamResult = await finalStream.next()
+        }
+
+        finalContent = text
+      }
+
+      return { content: finalContent, model: actualModel || session.model }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return reply.status(500).send({ error: message })
+    }
   })
 
   // Abort agent

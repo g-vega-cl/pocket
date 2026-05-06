@@ -136,4 +136,95 @@ describe('Server API', () => {
 
     await envApp.close()
   })
+
+  describe('POST /api/sessions/:id/improve', () => {
+    it('should 500 when OPENROUTER_API_KEY is not configured', async () => {
+      const keylessApp = await buildApp({
+        sessionsDir: tmpDir,
+        env: { OPENROUTER_API_KEY: '' },
+      })
+      await keylessApp.ready()
+
+      const create = await keylessApp.inject({
+        method: 'POST',
+        url: '/api/sessions',
+        payload: { repoUrl: 'https://github.com/user/repo', task: 'fix bug', model: 'openai/gpt-4o' },
+      })
+      const { id } = JSON.parse(create.payload)
+
+      const res = await keylessApp.inject({
+        method: 'POST',
+        url: `/api/sessions/${id}/improve`,
+        payload: { draft: 'test draft' },
+      })
+      expect(res.statusCode).toBe(500)
+      const body = JSON.parse(res.payload)
+      expect(body.error).toBe('OPENROUTER_API_KEY not configured')
+
+      await keylessApp.close()
+    })
+
+    it('should 404 for nonexistent session', async () => {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/api/sessions/nonexistent/improve',
+        payload: { draft: 'test draft' },
+      })
+      expect(res.statusCode).toBe(404)
+      const body = JSON.parse(res.payload)
+      expect(body.error).toBe('Session not found')
+    })
+
+    it('should 400 when draft is missing', async () => {
+      const create = await app.inject({
+        method: 'POST',
+        url: '/api/sessions',
+        payload: { repoUrl: 'https://github.com/user/repo', task: 'fix bug', model: 'openai/gpt-4o' },
+      })
+      const { id } = JSON.parse(create.payload)
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${id}/improve`,
+        payload: { draft: '' },
+      })
+      expect(res.statusCode).toBe(400)
+      const body = JSON.parse(res.payload)
+      expect(body.error).toBe('draft is required')
+    })
+
+    it('should 400 when draft is only whitespace', async () => {
+      const create = await app.inject({
+        method: 'POST',
+        url: '/api/sessions',
+        payload: { repoUrl: 'https://github.com/user/repo', task: 'fix bug', model: 'openai/gpt-4o' },
+      })
+      const { id } = JSON.parse(create.payload)
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${id}/improve`,
+        payload: { draft: '   ' },
+      })
+      expect(res.statusCode).toBe(400)
+    })
+
+    it('should 400 when draft is not provided at all', async () => {
+      const create = await app.inject({
+        method: 'POST',
+        url: '/api/sessions',
+        payload: { repoUrl: 'https://github.com/user/repo', task: 'fix bug', model: 'openai/gpt-4o' },
+      })
+      const { id } = JSON.parse(create.payload)
+
+      const res = await app.inject({
+        method: 'POST',
+        url: `/api/sessions/${id}/improve`,
+        payload: {},
+      })
+      // The endpoint checks draft presence and trim
+      const body = JSON.parse(res.payload)
+      expect(body.error).toBe('draft is required')
+    })
+  })
 })
