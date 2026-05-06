@@ -174,7 +174,7 @@ function SessionChatView() {
 
   return (
     <SessionInfoContext.Provider value={sessionInfo}>
-      <div className="max-w-3xl mx-auto h-[calc(100vh-2rem)] flex flex-col">
+      <div className="max-w-3xl mx-auto h-[calc(100dvh-2.5rem)] flex flex-col">
         {/* Messages — scrollable, content sticks to bottom */}
         <div className="flex-1 overflow-y-auto">
           <div className="min-h-full flex flex-col justify-end px-3 py-3 space-y-3">

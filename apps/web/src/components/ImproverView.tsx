@@ -108,7 +108,7 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
   }
 
   return (
-    <div className="max-w-3xl mx-auto h-[calc(100vh-2rem)] flex flex-col">
+    <div className="max-w-3xl mx-auto h-[calc(100dvh-2.5rem)] flex flex-col">
       {/* Header — back button + title */}
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <button
@@ -127,8 +127,8 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
       <div className="flex-1 overflow-y-auto">
         <div className="min-h-full flex flex-col justify-end px-3 py-3 space-y-3">
           {conversation.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`w-full rounded-lg px-3 py-2 text-sm ${
                 msg.role === 'user'
                   ? 'bg-[#4FB8B2] text-white'
                   : 'bg-purple-50 dark:bg-purple-950 text-gray-900 dark:text-gray-100 border border-purple-200 dark:border-purple-800'
