@@ -1,8 +1,6 @@
 import '@testing-library/jest-dom'
 import { vi } from 'vitest'
 
-Element.prototype.scrollIntoView = vi.fn()
-
 let mockEventSourceInstance: any = null
 
 class MockEventSource {

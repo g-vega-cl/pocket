@@ -746,7 +746,7 @@ apps/web/
       api.ts                 ← typed fetch wrapper for REST endpoints
 ```
 
-Components (`StatusBadge`, `ToolCallCard`, `PermissionPrompt`) are co-located in `sessions/$id.tsx` — extraction into separate files is deferred until the component count warrants it.
+Session status badges (`StatusBadge`, `TokenBadge`) live in `Header.tsx` and read from `SessionInfoContext` — the chat view provides the context, so the navbar shows live session state on session pages. `ToolCallCard` and `PermissionPrompt` remain co-located in `sessions/$id.tsx`.
 
 ### Two important UI principles
 
@@ -1067,11 +1067,13 @@ This pure function takes `Event[]` and optional `{ systemPrompt, nudgeText }`, r
 
 ### UI
 
-The improver is a full-page view (`apps/web/src/components/ImproverView.tsx`) that shares the same layout pattern as the main chat (`max-w-3xl h-[calc(100vh-4rem)] flex flex-col`). It completely replaces the chat view when active — a state toggle in `sessions/$id.tsx` switches between them. This is a mobile-first pattern: only one view and one scroll context exist at any time.
+The improver is a full-page view (`apps/web/src/components/ImproverView.tsx`) that shares the same layout pattern as the main chat (`max-w-3xl h-[calc(100vh-2rem)] flex flex-col`). It completely replaces the chat view when active — a state toggle in `sessions/$id.tsx` switches between them. This is a mobile-first pattern: only one view and one scroll context exist at any time.
+
+The min-2rem navbar height reserves space for the compact `Header` (≈32px). Messages use an inner `min-h-full flex flex-col justify-end` so content starts at the bottom and fills upward, with `overflow-y-auto` on the outer container for manual scroll-back. No auto-scroll fires during streaming — the user controls scroll position.
 
 Layout:
 - **Header** (`flex-shrink-0`): ← Back button + "Improve Prompt" title
-- **Conversation** (`flex-1 overflow-y-auto`): improver messages (purple background) and user replies (teal background)
+- **Conversation** (`flex-1 overflow-y-auto` with inner `min-h-full flex flex-col justify-end`): improver messages (purple background) and user replies (teal background)
 - **Input bar** (`flex-shrink-0`): text input + Send button for replies
 - **Action bar** (`flex-shrink-0`): Cancel (returns to chat, preserves draft) + **Apply Improved Prompt** (finalizes and fills textarea, then transitions back)
 - **"✨ Improve" button** in the main composer row (visible when textarea is non-empty and agent is idle)
