@@ -150,7 +150,7 @@ Every nudge is logged to `~/.pocket/watchdog.jsonl` for later analysis.
 
 ### Prompt improver
 
-An interactive prompt refinement tool that helps you write better prompts without polluting the agent's context. Click **✨ Improve** next to the composer to open a mini-chat with an improver agent that has access to the full session conversation. It asks clarifying questions, suggests improvements, and produces a refined prompt. The improvement conversation is a separate LLM call — it never touches the event log or the agent's context. Only the final accepted prompt enters the main chat.
+An interactive prompt refinement tool that helps you write better prompts without polluting the agent's context. Click **✨ Improve** next to the composer to open a mini-chat with an improver agent that has access to the full session conversation AND read-only tools (`read_file`, `list_files`, `glob`, `grep`, `web_fetch`, `web_search`, `git_status`, `git_log`, `git_diff`) to explore your codebase. It reads relevant files, searches for patterns, and checks git state to produce context-aware improvements. All tool execution is server-side — the UI only shows the final refined text. The improvement conversation is a separate LLM call — it never touches the event log or the agent's context. Only the final accepted prompt enters the main chat.
 
 ### Crash recovery
 
@@ -190,7 +190,7 @@ On restart, sessions that were `working` are marked `interrupted`. The client sh
 
 ## TODO - ROADMAP
 
-- [x] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context.
+- [x] Make sure we add a "prompt improver" where we can click a button or something and then the agent will try to improve the prompt, it will ask questions and try to improve the prompt -> Then send the new prompt to our main chat. When it improves the prompt it must not pollute the original LLM's context, but it also should have all the context. (Has read-only codebase tools: read_file, glob, grep, git_status, etc.)
 - [ ] Take inspiration from Bolt.diy and https://github.com/Gitlawb/openclaude
 - [ ] Pocket: allow local models and local model calculator and ranking based on ollama models?
 - [ ] And maybe a compress? - Or it might be better to just stop the convo once it gets too long? - Ask the user to retry or make a new prompt to start again with? - Isn't that basically the compress?

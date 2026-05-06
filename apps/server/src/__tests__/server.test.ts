@@ -138,6 +138,32 @@ describe('Server API', () => {
   })
 
   describe('POST /api/sessions/:id/improve', () => {
+    it('should 500 when OPENROUTER_API_KEY is not configured', async () => {
+      const keylessApp = await buildApp({
+        sessionsDir: tmpDir,
+        env: { OPENROUTER_API_KEY: '' },
+      })
+      await keylessApp.ready()
+
+      const create = await keylessApp.inject({
+        method: 'POST',
+        url: '/api/sessions',
+        payload: { repoUrl: 'https://github.com/user/repo', task: 'fix bug', model: 'openai/gpt-4o' },
+      })
+      const { id } = JSON.parse(create.payload)
+
+      const res = await keylessApp.inject({
+        method: 'POST',
+        url: `/api/sessions/${id}/improve`,
+        payload: { draft: 'test draft' },
+      })
+      expect(res.statusCode).toBe(500)
+      const body = JSON.parse(res.payload)
+      expect(body.error).toBe('OPENROUTER_API_KEY not configured')
+
+      await keylessApp.close()
+    })
+
     it('should 404 for nonexistent session', async () => {
       const res = await app.inject({
         method: 'POST',

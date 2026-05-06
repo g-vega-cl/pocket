@@ -598,7 +598,7 @@ Any Podman-compatible OCI image works. The image is pulled on first use (on dema
 | `GET` | `/api/sessions/:id` | Session metadata (status, model, branch) |
 | `GET` | `/api/sessions/:id/events` | **SSE stream**, supports `Last-Event-ID` |
 | `POST` | `/api/sessions/:id/messages` | Send chat message |
-| `POST` | `/api/sessions/:id/improve` | Prompt improvement — separate LLM call with full session context, never touches event log |
+| `POST` | `/api/sessions/:id/improve` | Prompt improvement — separate LLM call with full session context and read-only codebase tools, never touches event log |
 | `POST` | `/api/sessions/:id/abort` | Stop the agent mid-turn |
 | `POST` | `/api/sessions/:id/permission` | Resolve a permission request |
 | `POST` | `/api/sessions/:id/commit` | Manual commit |
@@ -950,7 +950,7 @@ Resolved during implementation:
 
 8. **Auto-bootstrap on clone** — after workspace is ready (cloned + sandbox started), `bootstrap_repo` tool automatically runs. It detects project type (node/python/rust/go), package manager (npm/pnpm/yarn/pip/cargo), scripts from package.json, config files (Vite, React, Next.js, Express, FastAPI, Django), and suggested dev server ports. It runs dependency install in the sandbox. Results are included in the agent's system prompt so the agent knows the exact commands for this repo instead of guessing.
 
-9. **Prompt improver** — an interactive prompt refinement tool accessible via the **✨ Improve** button in the chat composer. Opens a modal with a mini-chat to a separate LLM call (same session model) that has access to the full session conversation history. The improver asks clarifying questions, suggests improvements, and produces a refined prompt. When the user clicks **Apply**, the final prompt replaces the textarea. Key design: the improver's API (`POST /api/sessions/:id/improve`) never touches `events.jsonl`, never emits SSE events, and never goes through `AgentRunner`. The conversation state lives in the React modal. Only the final accepted prompt enters the main chat. See §19.
+9. **Prompt improver** — an interactive prompt refinement tool accessible via the **✨ Improve** button in the chat composer. Opens a full-page view with a mini-chat to a separate LLM call (same session model) that has access to the full session conversation history AND 9 read-only tools (`read_file`, `list_files`, `glob`, `grep`, `web_fetch`, `web_search`, `git_status`, `git_log`, `git_diff`) to explore the codebase. The improver runs a server-side tool loop (up to 5 iterations) — tool execution is invisible to the client. When the user clicks **Apply**, the final prompt replaces the textarea. Key design: the improver's API (`POST /api/sessions/:id/improve`) never touches `events.jsonl`, never emits SSE events, and never goes through `AgentRunner`. The conversation state lives in the React component. Only the final accepted prompt enters the main chat. See §19.
 
 Still open:
 - **Web push** — deferred to v1.5 per §6.
@@ -962,6 +962,8 @@ Still open:
 ## 19. Prompt improver
 
 The prompt improver is a separate mini-chat that helps users refine prompts before sending them to the main agent. It deliberately stays **outside** the event log and agent loop — only the final accepted prompt enters the session.
+
+The improver has access to **read-only tools** (`read_file`, `list_files`, `glob`, `grep`, `web_fetch`, `web_search`, `git_status`, `git_log`, `git_diff`) so it can explore the codebase when refining a prompt. Tool execution is entirely server-side — the client never sees tool calls or results, only the final improved text.
 
 ### Design (mobile-first full-view transition)
 
@@ -978,10 +980,15 @@ Auto-sends POST /api/sessions/:id/improve   { draft, conversation: [] }
       │
       ▼
 Server: reads full session context from events.jsonl
-      │  via buildConversationFromEvents()
+      │  via buildConversationFromEvents() (includes tool calls + results)
       ▼
-Separate OpenRouterProvider.streamChat() call
-      │  (same session model, same API key)
+Server: builds read-only ToolRegistry (9 tools) + ToolContext
+      │
+      ▼
+Tool-using loop (up to 5 iterations):
+      │  ├─ Call OpenRouterProvider.streamChat() with read-only tools
+      │  ├─ If text response only → return it
+      │  └─ If tool calls → execute read-only tools, feed results back, loop
       │  NOT through AgentRunner — no event log writes, no SSE
       ▼
 Returns { content, model } as JSON (non-streaming to client)
@@ -1002,10 +1009,12 @@ Improved prompt fills textarea → transitions back to main chat
 
 | Constraint | How it's met |
 |---|---|
-| **Must not pollute LLM context** | Separate `streamChat()` call, never through `AgentRunner` |
-| **Must have full context** | Server reads `events.jsonl` via `buildConversationFromEvents()`, filters to user/assistant text, includes as system message |
+| **Must not pollute LLM context** | Separate `streamChat()` calls inside a server-side tool loop, never through `AgentRunner` |
+| **Must have full context** | Server reads `events.jsonl` via `buildConversationFromEvents()`, includes tool calls + truncated tool results as system message |
+| **Must explore the codebase** | Server builds a `ToolRegistry` with 9 read-only tools (`read_file`, `list_files`, `glob`, `grep`, `web_fetch`, `web_search`, `git_status`, `git_log`, `git_diff`). Tool execution is server-side only, invisible to the client |
 | **Must be interactive** | Client manages conversation state in React; each turn is a separate API call |
 | **Must use session's model** | Server reads `session.model` and passes it to the improver |
+| **Must not run forever** | Max 5 tool-turn iterations; if exhausted without a text response, a final text-only call is forced |
 
 ### Server endpoint
 
@@ -1031,10 +1040,19 @@ Response:
 ### Improver system prompt
 
 The improver receives a system prompt telling it:
-1. It's a prompt refinement assistant with access to the full session context
-2. If the draft is vague, ask up to 3 specific clarifying questions
-3. If the draft is clear, produce an improved version directly
-4. When explicitly asked to finalize, output **only** the improved prompt text, no commentary
+1. It's a prompt refinement assistant with access to the full session context AND read-only tools to explore the codebase
+2. It should first use read tools to gather relevant context (read files, check git status, search for patterns)
+3. If the draft is vague, ask up to 3 specific clarifying questions
+4. If the draft is clear, produce an improved version directly
+5. When explicitly asked to finalize, output **only** the improved prompt text, no commentary
+
+### Read-only tool loop
+
+The server-side loop (max 5 iterations) works like this:
+1. Call `provider.streamChat()` with the 9 read-only tool definitions
+2. If the response is text-only → return it to the client
+3. If the response includes tool calls → execute each tool via `tool.call(validatedArgs, ctx)`, append results to the message list, and repeat
+4. If all 5 iterations are exhausted without a text response → force a final text-only call with the prompt "Please provide your final response based on what you have explored"
 
 ### Conversation builder extraction
 
