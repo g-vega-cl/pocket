@@ -31,6 +31,32 @@ function applyThemeMode(mode: ThemeMode) {
   document.documentElement.style.colorScheme = resolved
 }
 
+function AutoIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" className="w-4 h-4" strokeWidth="1.5">
+      <circle cx="8" cy="8" r="5.5" stroke="currentColor" />
+      <path d="M8 2.5A5.5 5.5 0 0 1 8 13.5V2.5Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function LightIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" className="w-4 h-4" strokeWidth="1.5">
+      <circle cx="8" cy="8" r="3" stroke="currentColor" />
+      <path d="M8 1v1.5M8 13.5V15M2.5 8H1M15 8h-1.5M4.11 4.11l-1.06-1.06M12.95 12.95l-1.06-1.06M4.11 11.89l-1.06 1.06M12.95 3.05l-1.06 1.06" stroke="currentColor" strokeLinecap="round" />
+    </svg>
+  )
+}
+
+function DarkIcon() {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" className="w-4 h-4" strokeWidth="1.5">
+      <path d="M13.5 10.5A6.5 6.5 0 1 1 5.5 2.5a5.5 5.5 0 0 0 8 8Z" stroke="currentColor" />
+    </svg>
+  )
+}
+
 export default function ThemeToggle() {
   const [mode, setMode] = useState<ThemeMode>('auto')
 
@@ -64,8 +90,10 @@ export default function ThemeToggle() {
 
   const label =
     mode === 'auto'
-      ? 'Theme mode: auto (system). Click to switch to light mode.'
-      : `Theme mode: ${mode}. Click to switch mode.`
+      ? 'Theme: auto'
+      : mode === 'dark'
+        ? 'Theme: dark'
+        : 'Theme: light'
 
   return (
     <button
@@ -73,9 +101,9 @@ export default function ThemeToggle() {
       onClick={toggleMode}
       aria-label={label}
       title={label}
-      className="rounded-full border border-[var(--chip-line)] bg-[var(--chip-bg)] px-3 py-1.5 text-sm font-semibold text-[var(--sea-ink)] shadow-[0_8px_22px_rgba(30,90,72,0.08)] transition hover:-translate-y-0.5"
+      className="inline-flex items-center justify-center w-6 h-6 rounded text-[var(--sea-ink-soft)] hover:text-[var(--sea-ink)] transition-colors"
     >
-      {mode === 'auto' ? 'Auto' : mode === 'dark' ? 'Dark' : 'Light'}
+      {mode === 'auto' ? <AutoIcon /> : mode === 'dark' ? <DarkIcon /> : <LightIcon />}
     </button>
   )
 }

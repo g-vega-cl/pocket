@@ -4,6 +4,7 @@ import { usePocketSession } from '#/hooks/usePocketSession.js'
 import { ThinkingDrawer } from '#/components/ThinkingDrawer.js'
 import { ImproverView } from '#/components/ImproverView.js'
 import type { PendingPermission } from '#/state/events.js'
+import { SessionInfoContext } from '#/state/session-context.js'
 
 function formatMessageTime(ts: number): string {
   const date = new Date(ts)
@@ -28,63 +29,6 @@ function formatMessageTime(ts: number): string {
 export const Route = createFileRoute('/sessions/$id')({
   component: SessionChatView,
 })
-
-function TokenBadge({ tokenUsage, contextWindow: cw }: { tokenUsage: { promptTokens: number; completionTokens: number; totalTokens: number; contextWindow: number } | null; contextWindow: number }) {
-  const total = tokenUsage?.totalTokens ?? 0
-  const contextWindow = tokenUsage?.contextWindow ?? cw
-  const ratio = contextWindow > 0 ? total / contextWindow : 0
-  const pct = Math.round(ratio * 100)
-
-  const color = ratio >= 0.9
-    ? 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
-    : ratio >= 0.75
-      ? 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
-      : ratio >= 0.5
-        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
-        : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400'
-
-  const barColor = ratio >= 0.9
-    ? 'bg-red-500'
-    : ratio >= 0.75
-      ? 'bg-orange-500'
-      : ratio >= 0.5
-        ? 'bg-yellow-500'
-        : 'bg-[#4FB8B2]'
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-full font-medium ${color}`}
-      title={`Prompt: ${tokenUsage?.promptTokens.toLocaleString() ?? '—'} | Completion: ${tokenUsage?.completionTokens.toLocaleString() ?? '—'} | Total: ${total.toLocaleString()} / ${contextWindow.toLocaleString()}`}
-    >
-      <span className="w-12 h-1.5 bg-black/10 dark:bg-white/10 rounded-full overflow-hidden inline-block">
-        <span className={`h-full ${barColor} rounded-full block transition-all`} style={{ width: `${Math.min(pct, 100)}%` }} />
-      </span>
-      <span>{total.toLocaleString()} / {contextWindow.toLocaleString()}</span>
-    </span>
-  )
-}
-
-function StatusBadge({ status, isThinking }: { status: string; isThinking: boolean }) {
-  const colors: Record<string, string> = {
-    creating: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
-    cloning: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
-    sandboxing: 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
-    ready: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-    working: 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
-    idle: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400',
-    awaiting_permission: 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
-    done: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
-    error: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
-    interrupted: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
-  }
-  const color = colors[status] ?? colors.creating
-  const label = isThinking ? `${status} …` : status
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${color}`}>
-      {label}
-    </span>
-  )
-}
 
 function ToolCallCard({ toolCall }: { toolCall: { toolCallId: string; toolName: string; args: Record<string, unknown>; status: string; result?: unknown; error?: string; progress?: string } }) {
   const [expanded, setExpanded] = useState(false)
@@ -178,7 +122,7 @@ function SessionChatView() {
   const { id } = Route.useParams()
   const {
     messages, pendingPermissions, status, isThinking, error, tokenUsage, contextWindow,
-    connected, session, sendMessage, abort, resolvePermission, loadSession,
+    session, sendMessage, abort, resolvePermission, loadSession,
   } = usePocketSession(id)
 
   const storagePrefix = `pocket:improver:${id}`
@@ -188,8 +132,6 @@ function SessionChatView() {
   useEffect(() => {
     loadSession(id)
   }, [id, loadSession])
-
-  // Auto-scroll removed — container uses justify-end, so latest messages stay visible
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault()
@@ -222,163 +164,161 @@ function SessionChatView() {
     )
   }
 
+  const sessionInfo = {
+    status,
+    tokenUsage,
+    contextWindow,
+    sessionName: session?.task || session?.repoUrl || id,
+    isThinking,
+  }
+
   return (
-    <div className="max-w-3xl mx-auto h-[calc(100vh-4rem)] flex flex-col">
-      {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex items-center gap-3 flex-shrink-0">
-        <StatusBadge status={status} isThinking={isThinking} />
-        <TokenBadge tokenUsage={tokenUsage} contextWindow={contextWindow} />
-        <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-400' : 'bg-red-400'}`} title={connected ? 'Connected' : 'Disconnected'} />
-        {session && (
-          <span className="text-sm text-gray-600 dark:text-gray-400 truncate">
-            {session.task || session.repoUrl}
-          </span>
-        )}
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 flex flex-col justify-end overflow-hidden px-4 py-4 space-y-3">
-        {/* Workspace setup progress (shown before any user messages) */}
-        {messages.filter(m => m.role === 'user').length === 0 && (status === 'creating' || status === 'cloning' || status === 'ready' || status === 'working') && (
-          <div className="flex justify-start">
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3 text-sm text-gray-900 dark:text-gray-100 w-full">
-              <div className="flex items-center gap-2 mb-2">
-                {status !== 'ready' && (
-                  <svg className="animate-spin h-4 w-4 text-[#4FB8B2]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                )}
-                <span className="font-medium text-gray-700 dark:text-gray-300">
-                  {status === 'ready' ? 'Workspace ready' : 'Setting up workspace'}
-                </span>
-              </div>
-              <div className="space-y-1 mb-2">
-                {status === 'creating' && <div className="text-xs text-gray-500 dark:text-gray-400">Creating session...</div>}
-                {status === 'cloning' && <div className="text-xs text-gray-500 dark:text-gray-400">Cloning repository...</div>}
-                {status === 'ready' && <div className="text-xs text-gray-500 dark:text-gray-400">Ready! Send a message to start.</div>}
-                {status === 'working' && <div className="text-xs text-gray-500 dark:text-gray-400">Analyzing repository...</div>}
-              </div>
-              {status !== 'ready' && (
-                <div className="flex gap-1.5">
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {messages.map((msg, i) => {
-          const isLatestAssistant = msg.role === 'assistant' && i === messages.length - 1
-          const isFallback = msg.role === 'assistant' && msg.model && session?.model &&
-            !msg.model.startsWith(session.model) && !session.model.startsWith(msg.model)
-          return (
-            <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className="max-h-[160px] overflow-y-auto">
-                <div className={`rounded-lg px-4 py-2 text-sm w-full ${
-                  msg.role === 'user'
-                    ? 'bg-[#4FB8B2] text-white'
-                    : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-                }`}>
-                  {msg.reasoning && (
-                    <ThinkingDrawer reasoning={msg.reasoning} isThinking={isLatestAssistant && isThinking} />
+    <SessionInfoContext.Provider value={sessionInfo}>
+      <div className="max-w-3xl mx-auto h-[calc(100vh-2rem)] flex flex-col">
+        {/* Messages — scrollable, content sticks to bottom */}
+        <div className="flex-1 overflow-y-auto">
+          <div className="min-h-full flex flex-col justify-end px-3 py-3 space-y-3">
+            {/* Workspace setup progress (shown before any user messages) */}
+            {messages.filter(m => m.role === 'user').length === 0 && (status === 'creating' || status === 'cloning' || status === 'ready' || status === 'working') && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-3 text-sm text-gray-900 dark:text-gray-100 w-full">
+                  <div className="flex items-center gap-2 mb-2">
+                    {status !== 'ready' && (
+                      <svg className="animate-spin h-4 w-4 text-[#4FB8B2]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                    )}
+                    <span className="font-medium text-gray-700 dark:text-gray-300">
+                      {status === 'ready' ? 'Workspace ready' : 'Setting up workspace'}
+                    </span>
+                  </div>
+                  <div className="space-y-1 mb-2">
+                    {status === 'creating' && <div className="text-xs text-gray-500 dark:text-gray-400">Creating session...</div>}
+                    {status === 'cloning' && <div className="text-xs text-gray-500 dark:text-gray-400">Cloning repository...</div>}
+                    {status === 'ready' && <div className="text-xs text-gray-500 dark:text-gray-400">Ready! Send a message to start.</div>}
+                    {status === 'working' && <div className="text-xs text-gray-500 dark:text-gray-400">Analyzing repository...</div>}
+                  </div>
+                  {status !== 'ready' && (
+                    <div className="flex gap-1.5">
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                    </div>
                   )}
-                  <div className="whitespace-pre-wrap break-words">{msg.content || (isThinking && i === messages.length - 1 ? 'Thinking...' : '')}</div>
-                  {msg.toolCalls?.map(tc => (
-                    <ToolCallCard key={tc.toolCallId} toolCall={tc} />
-                  ))}
                 </div>
               </div>
-              <div className="flex items-center gap-2 mt-0.5 px-1">
-                {msg.role === 'assistant' && msg.model && (
-                  <span
-                    className={`text-[10px] font-mono ${isFallback ? 'text-orange-500 dark:text-orange-400' : 'text-gray-400 dark:text-gray-500'}`}
-                    title={isFallback ? `Requested: ${session?.model} — Fallback: ${msg.model}` : `Model: ${msg.model}`}
-                  >
-                    {isFallback ? '\u26A0 ' : ''}{msg.model}
-                  </span>
-                )}
-                <span className="text-[10px] text-gray-400 dark:text-gray-500">
-                  {formatMessageTime(msg.timestamp)}
-                </span>
+            )}
+
+            {messages.map((msg, i) => {
+              const isLatestAssistant = msg.role === 'assistant' && i === messages.length - 1
+              const isFallback = msg.role === 'assistant' && msg.model && session?.model &&
+                !msg.model.startsWith(session.model) && !session.model.startsWith(msg.model)
+              return (
+                <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                  <div className={`rounded-lg px-3 py-2 text-sm w-full ${
+                    msg.role === 'user'
+                      ? 'bg-[#4FB8B2] text-white'
+                      : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+                  }`}>
+                    {msg.reasoning && (
+                      <ThinkingDrawer reasoning={msg.reasoning} isThinking={isLatestAssistant && isThinking} />
+                    )}
+                    <div className="whitespace-pre-wrap break-words">{msg.content || (isThinking && i === messages.length - 1 ? 'Thinking...' : '')}</div>
+                    {msg.toolCalls?.map(tc => (
+                      <ToolCallCard key={tc.toolCallId} toolCall={tc} />
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2 mt-0.5 px-1">
+                    {msg.role === 'assistant' && msg.model && (
+                      <span
+                        className={`text-[10px] font-mono ${isFallback ? 'text-orange-500 dark:text-orange-400' : 'text-gray-400 dark:text-gray-500'}`}
+                        title={isFallback ? `Requested: ${session?.model} — Fallback: ${msg.model}` : `Model: ${msg.model}`}
+                      >
+                        {isFallback ? '\u26A0 ' : ''}{msg.model}
+                      </span>
+                    )}
+                    <span className="text-[10px] text-gray-400 dark:text-gray-500">
+                      {formatMessageTime(msg.timestamp)}
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Pending permissions */}
+            {pendingPermissions.map(pp => (
+              <PermissionPrompt key={pp.permissionId} permission={pp} onResolve={resolvePermission} />
+            ))}
+
+            {isThinking && (
+              <div className="flex justify-start">
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-2 w-full">
+                  <div className="flex gap-1.5">
+                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                </div>
               </div>
-            </div>
-          )
-        })}
+            )}
 
-        {/* Pending permissions */}
-        {pendingPermissions.map(pp => (
-          <PermissionPrompt key={pp.permissionId} permission={pp} onResolve={resolvePermission} />
-        ))}
-
-        {isThinking && (
-          <div className="flex justify-start">
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg px-4 py-2 w-full">
-              <div className="flex gap-1.5">
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            {error && (
+              <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
+                {error}
               </div>
-            </div>
+            )}
           </div>
-        )}
+        </div>
 
-        {error && (
-          <div className="p-3 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-300">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {/* Composer */}
-      <form onSubmit={handleSend} className="px-4 py-3 border-t border-gray-200 dark:border-gray-700 flex gap-2 flex-shrink-0">
-        <textarea
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-              e.preventDefault()
-              document.querySelector('form')?.requestSubmit()
-            }
-          }}
-          placeholder={isThinking ? 'Agent is thinking...' : 'Send a message...'}
-          disabled={isThinking}
-          rows={1}
-          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[80px] [field-sizing:content]"
-        />
-        {!isThinking && input.trim() && (
-          <button
-            type="button"
-            onClick={() => {
-              localStorage.setItem(`${storagePrefix}:active`, '1')
-              localStorage.setItem(`${storagePrefix}:draft`, input)
-              setShowImprover(true)
+        {/* Composer */}
+        <form onSubmit={handleSend} className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 flex gap-2 flex-shrink-0">
+          <textarea
+            value={input}
+            onChange={e => setInput(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                document.querySelector('form')?.requestSubmit()
+              }
             }}
-            className="px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            ✨ Improve
-          </button>
-        )}
-        {isThinking ? (
-          <button
-            type="button"
-            onClick={() => abort()}
-            className="px-4 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            Stop
-          </button>
-        ) : (
-          <button
-            type="submit"
-            disabled={!input.trim()}
-            className="px-4 py-2 bg-[#4FB8B2] hover:bg-[#3da39d] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            Send
-          </button>
-        )}
-      </form>
-    </div>
+            placeholder={isThinking ? 'Agent is thinking...' : 'Send a message...'}
+            disabled={isThinking}
+            rows={1}
+            className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[80px] [field-sizing:content]"
+          />
+          {!isThinking && input.trim() && (
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem(`${storagePrefix}:active`, '1')
+                localStorage.setItem(`${storagePrefix}:draft`, input)
+                setShowImprover(true)
+              }}
+              className="px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              ✨ Improve
+            </button>
+          )}
+          {isThinking ? (
+            <button
+              type="button"
+              onClick={() => abort()}
+              className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Stop
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!input.trim()}
+              className="px-3 py-2 bg-[#4FB8B2] hover:bg-[#3da39d] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+            >
+              Send
+            </button>
+          )}
+        </form>
+      </div>
+    </SessionInfoContext.Provider>
   )
 }
