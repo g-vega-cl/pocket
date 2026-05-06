@@ -108,7 +108,7 @@ export function ImproverView({ sessionId, draft, onApply, onBack }: ImproverView
   }
 
   return (
-    <div className="max-w-5xl mx-auto flex-1 min-h-0 flex flex-col">
+    <div className="max-w-5xl mx-auto h-[calc(100dvh-2.5rem)] flex flex-col">
       {/* Header — back button + title */}
       <div className="flex items-center gap-3 px-3 py-2 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
         <button
