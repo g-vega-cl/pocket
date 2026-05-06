@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { usePocketSession } from '#/hooks/usePocketSession.js'
 import { ThinkingDrawer } from '#/components/ThinkingDrawer.js'
 import { ImproverView } from '#/components/ImproverView.js'
@@ -184,15 +184,12 @@ function SessionChatView() {
   const storagePrefix = `pocket:improver:${id}`
   const [input, setInput] = useState(() => localStorage.getItem(`${storagePrefix}:draft`) ?? '')
   const [showImprover, setShowImprover] = useState(() => localStorage.getItem(`${storagePrefix}:active`) === '1')
-  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     loadSession(id)
   }, [id, loadSession])
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  // Auto-scroll removed — container uses justify-end, so latest messages stay visible
 
   async function handleSend(e: React.FormEvent) {
     e.preventDefault()
@@ -240,7 +237,7 @@ function SessionChatView() {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
+      <div className="flex-1 flex flex-col justify-end overflow-hidden px-4 py-4 space-y-3">
         {/* Workspace setup progress (shown before any user messages) */}
         {messages.filter(m => m.role === 'user').length === 0 && (status === 'creating' || status === 'cloning' || status === 'ready' || status === 'working') && (
           <div className="flex justify-start">
@@ -279,18 +276,20 @@ function SessionChatView() {
             !msg.model.startsWith(session.model) && !session.model.startsWith(msg.model)
           return (
             <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`rounded-lg px-4 py-2 text-sm w-full ${
-                msg.role === 'user'
-                  ? 'bg-[#4FB8B2] text-white'
-                  : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
-              }`}>
-                {msg.reasoning && (
-                  <ThinkingDrawer reasoning={msg.reasoning} isThinking={isLatestAssistant && isThinking} />
-                )}
-                <div className="whitespace-pre-wrap break-words">{msg.content || (isThinking && i === messages.length - 1 ? 'Thinking...' : '')}</div>
-                {msg.toolCalls?.map(tc => (
-                  <ToolCallCard key={tc.toolCallId} toolCall={tc} />
-                ))}
+              <div className="max-h-[160px] overflow-y-auto">
+                <div className={`rounded-lg px-4 py-2 text-sm w-full ${
+                  msg.role === 'user'
+                    ? 'bg-[#4FB8B2] text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100'
+                }`}>
+                  {msg.reasoning && (
+                    <ThinkingDrawer reasoning={msg.reasoning} isThinking={isLatestAssistant && isThinking} />
+                  )}
+                  <div className="whitespace-pre-wrap break-words">{msg.content || (isThinking && i === messages.length - 1 ? 'Thinking...' : '')}</div>
+                  {msg.toolCalls?.map(tc => (
+                    <ToolCallCard key={tc.toolCallId} toolCall={tc} />
+                  ))}
+                </div>
               </div>
               <div className="flex items-center gap-2 mt-0.5 px-1">
                 {msg.role === 'assistant' && msg.model && (
@@ -331,8 +330,6 @@ function SessionChatView() {
             {error}
           </div>
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
       {/* Composer */}
@@ -349,7 +346,7 @@ function SessionChatView() {
           placeholder={isThinking ? 'Agent is thinking...' : 'Send a message...'}
           disabled={isThinking}
           rows={1}
-          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[200px] [field-sizing:content]"
+          className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[80px] [field-sizing:content]"
         />
         {!isThinking && input.trim() && (
           <button
