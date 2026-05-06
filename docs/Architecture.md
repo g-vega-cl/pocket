@@ -761,7 +761,13 @@ When the actual model differs from the session's configured model, the display t
 
 ### SSR caveat
 
-TanStack Start does SSR. Your existing hydration concern (the `wsUrl` in `useEffect`) generalizes here: anything that depends on `EventSource` must be client-only, since `EventSource` doesn't exist on the server. Wrap session-stream-using components with a "client only" boundary or render a skeleton during SSR.
+TanStack Start does SSR by default. However, the chat route (`/sessions/:id`) uses `ssr: false` to render entirely on the client. This is the right choice for chat because:
+- No SEO value — it's behind auth, not indexed
+- Initial load is empty anyway — needs SSE to show messages  
+- Highly interactive — client-side from the start
+- Avoids SSR bugs with browser APIs (localStorage, EventSource, window)
+
+Other routes (homepage, about) remain SSR-enabled. Any component that depends on `EventSource` must be client-only — wrap with a "client only" boundary or render a skeleton during SSR.
 
 ### Data fetching with TanStack Query
 

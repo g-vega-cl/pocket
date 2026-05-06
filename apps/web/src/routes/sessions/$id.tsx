@@ -27,6 +27,7 @@ function formatMessageTime(ts: number): string {
 }
 
 export const Route = createFileRoute('/sessions/$id')({
+  ssr: false,
   component: SessionChatView,
 })
 
@@ -233,7 +234,7 @@ function SessionChatView() {
                     {msg.role === 'assistant' && msg.model && (
                       <span
                         className={`text-[10px] font-mono ${isFallback ? 'text-orange-500 dark:text-orange-400' : 'text-gray-400 dark:text-gray-500'}`}
-                        title={isFallback ? `Requested: ${session?.model} — Fallback: ${msg.model}` : `Model: ${msg.model}`}
+                        title={isFallback ? `Requested: ${session.model} — Fallback: ${msg.model}` : `Model: ${msg.model}`}
                       >
                         {isFallback ? '\u26A0 ' : ''}{msg.model}
                       </span>
