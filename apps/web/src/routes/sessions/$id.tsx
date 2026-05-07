@@ -273,7 +273,7 @@ function SessionChatView() {
         </div>
 
         {/* Composer */}
-        <form onSubmit={handleSend} className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 flex gap-2 flex-shrink-0">
+        <form onSubmit={handleSend} className="px-3 py-2 border-t border-gray-200 dark:border-gray-700 flex gap-2 flex-shrink-0 items-stretch">
           <textarea
             value={input}
             onChange={e => setInput(e.target.value)}
@@ -288,36 +288,38 @@ function SessionChatView() {
             rows={1}
             className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none disabled:opacity-50 resize-none overflow-y-auto max-h-[80px] [field-sizing:content]"
           />
-          {!isThinking && input.trim() && (
-            <button
-              type="button"
-              onClick={() => {
-                localStorage.setItem(`${storagePrefix}:active`, '1')
-                localStorage.setItem(`${storagePrefix}:draft`, input)
-                setShowImprover(true)
-              }}
-              className="px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              ✨ Improve
-            </button>
-          )}
-          {isThinking ? (
-            <button
-              type="button"
-              onClick={() => abort()}
-              className="px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              Stop
-            </button>
-          ) : (
-            <button
-              type="submit"
-              disabled={!input.trim()}
-              className="px-3 py-2 bg-[#4FB8B2] hover:bg-[#3da39d] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
-            >
-              Send
-            </button>
-          )}
+          <div className="flex flex-col gap-2">
+            {!isThinking && input.trim() && (
+              <button
+                type="button"
+                onClick={() => {
+                  localStorage.setItem(`${storagePrefix}:active`, '1')
+                  localStorage.setItem(`${storagePrefix}:draft`, input)
+                  setShowImprover(true)
+                }}
+                className="w-full px-3 py-2 bg-purple-500 hover:bg-purple-600 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                ✨ Improve
+              </button>
+            )}
+            {isThinking ? (
+              <button
+                type="button"
+                onClick={() => abort()}
+                className="w-full px-3 py-2 bg-red-500 hover:bg-red-600 text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                disabled={!input.trim()}
+                className="w-full px-3 py-2 bg-[#4FB8B2] hover:bg-[#3da39d] disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium rounded-lg transition-colors"
+              >
+                Send
+              </button>
+            )}
+          </div>
         </form>
       </div>
     </SessionInfoContext.Provider>
