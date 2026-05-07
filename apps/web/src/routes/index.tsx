@@ -2,14 +2,19 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
 import { api } from '#/shared/api/client.js'
 import { listSessions } from '#/features/session/api/server-fns.js'
+import { fetchRepos } from '#/features/repo/api/server-fns.js'
 import { RepoDropdown } from '#/features/repo/components/RepoDropdown.js'
 import type { GitHubRepo } from '#/shared/api/client.js'
 
 export const Route = createFileRoute('/')({
   loader: async () => {
-    const sessionsData = await listSessions()
+    const [sessionsData, reposData] = await Promise.all([
+      listSessions(),
+      fetchRepos(),
+    ])
     return {
       sessions: sessionsData.sessions,
+      repos: reposData.repos,
     }
   },
   component: HomePage,
@@ -17,7 +22,7 @@ export const Route = createFileRoute('/')({
 
 function HomePage() {
   const navigate = useNavigate()
-  const { sessions } = Route.useLoaderData()
+  const { sessions, repos } = Route.useLoaderData()
   const [repoUrl, setRepoUrl] = useState('')
   const [task, setTask] = useState('')
   const [model, setModel] = useState('deepseek/deepseek-v4-flash')
@@ -58,7 +63,7 @@ function HomePage() {
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Repository
           </label>
-          <RepoDropdown onSelect={handleRepoSelect} />
+          <RepoDropdown onSelect={handleRepoSelect} initialRepos={repos} githubToken={githubToken} />
         </div>
 
         <div>

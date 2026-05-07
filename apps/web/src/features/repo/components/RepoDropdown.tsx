@@ -14,9 +14,11 @@ function formatDate(dateStr: string): string {
 
 interface RepoDropdownProps {
   onSelect: (repo: GitHubRepo) => void
+  initialRepos?: GitHubRepo[]
+  githubToken?: string
 }
 
-export function RepoDropdown({ onSelect }: RepoDropdownProps) {
+export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdownProps) {
   const {
     search,
     updateSearch,
@@ -25,7 +27,7 @@ export function RepoDropdown({ onSelect }: RepoDropdownProps) {
     open,
     filteredRepos,
     dropdownRef,
-  } = useRepoDropdown()
+  } = useRepoDropdown(initialRepos, githubToken)
 
   function handleSelect(repo: GitHubRepo) {
     select(repo)
