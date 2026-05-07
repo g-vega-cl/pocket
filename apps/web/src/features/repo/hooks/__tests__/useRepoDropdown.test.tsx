@@ -167,7 +167,7 @@ describe('useRepoDropdown', () => {
     expect(result.current.isOpen).toBe(false)
   })
 
-  it('does not open dropdown when repos list is empty', async () => {
+  it('allows opening dropdown even when repos list is empty', async () => {
     vi.spyOn(api, 'fetchRepos').mockResolvedValue({ repos: [] })
 
     const { result } = renderHook(() => useRepoDropdown(), {
@@ -179,6 +179,6 @@ describe('useRepoDropdown', () => {
     act(() => {
       result.current.open()
     })
-    expect(result.current.isOpen).toBe(false)
+    expect(result.current.isOpen).toBe(true)
   })
 })

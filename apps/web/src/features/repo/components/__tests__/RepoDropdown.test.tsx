@@ -27,6 +27,9 @@ function setupHookReturn(overrides: Record<string, unknown> = {}) {
     isOpen: false,
     open: vi.fn(),
     filteredRepos: [],
+    repos: [],
+    isLoading: false,
+    selectedRepo: null,
     dropdownRef: { current: null },
     ...overrides,
   })
@@ -104,7 +107,7 @@ describe('RepoDropdown', () => {
   })
 
   it('shows empty message when open but no repos match', () => {
-    setupHookReturn({ isOpen: true, filteredRepos: [] })
+    setupHookReturn({ isOpen: true, filteredRepos: [], repos: [makeRepo()] })
     render(<RepoDropdown onSelect={vi.fn()} />)
     expect(screen.getByText('No repos match your search')).toBeInTheDocument()
   })
