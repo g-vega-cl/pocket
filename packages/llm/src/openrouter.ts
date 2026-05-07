@@ -38,6 +38,7 @@ export class OpenRouterProvider implements LLMProvider {
   }
 
   async *streamChat(req: ChatRequest): AsyncGenerator<LLMChunk, ChatUsage> {
+    console.log(`[Pocket] OpenRouter: streaming chat (model=${req.model}, fallbacks=${BACKUP_MODEL},${BACKUP_MODEL_2})`)
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -58,8 +59,11 @@ export class OpenRouterProvider implements LLMProvider {
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error')
+      console.error(`[Pocket] OpenRouter: HTTP ${response.status} error for model ${req.model}: ${errorText}`)
       throw new Error(`OpenRouter error: ${response.status} - ${errorText}`)
     }
+
+    console.log(`[Pocket] OpenRouter: connected (model=${req.model}, status=${response.status})`)
 
     const reader = response.body?.getReader()
     if (!reader) {
@@ -94,6 +98,9 @@ export class OpenRouterProvider implements LLMProvider {
 
             // Capture the actual model used (OpenRouter may fallback to backup models)
             if (parsed.model && typeof parsed.model === 'string') {
+              if (parsed.model !== actualModel) {
+                console.log(`[Pocket] OpenRouter: using model ${parsed.model} (fallback from ${req.model})`)
+              }
               actualModel = parsed.model
             }
 
@@ -174,6 +181,12 @@ export class OpenRouterProvider implements LLMProvider {
 
     } finally {
       reader.releaseLock()
+    }
+
+    if (!usage) {
+      console.warn(`[Pocket] OpenRouter: stream ended without usage object for model ${actualModel || req.model}`)
+    } else {
+      console.log(`[Pocket] OpenRouter: stream complete for model ${actualModel || req.model} (promptTokens=${usage.promptTokens}, completionTokens=${usage.completionTokens})`)
     }
 
     return usage ?? { promptTokens: 0, completionTokens: 0, totalTokens: 0 }

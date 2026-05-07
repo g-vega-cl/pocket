@@ -255,11 +255,13 @@ export async function buildApp(options: BuildOptions) {
     const { id } = request.params as { id: string }
     const session = sessionManager.getSession(id)
     if (!session) {
+      console.warn(`[Pocket] Events: session ${id} not found`)
       return reply.status(404).send({ error: 'Session not found' })
     }
 
     const lastEventId = request.headers['last-event-id']
     const afterSeq = lastEventId ? parseInt(String(lastEventId), 10) : 0
+    console.log(`[Pocket] Events: SSE connection established for session ${id} (afterSeq=${afterSeq})`)
 
     reply.raw.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -288,6 +290,7 @@ export async function buildApp(options: BuildOptions) {
 
     // Cleanup on disconnect
     request.raw.on('close', () => {
+      console.log(`[Pocket] Events: client disconnected for session ${id}`)
       clearInterval(heartbeat)
       unsubscribe()
     })
@@ -303,20 +306,27 @@ export async function buildApp(options: BuildOptions) {
 
     const session = sessionManager.getSession(id)
     if (!session) {
+      console.warn(`[Pocket] Messages: session ${id} not found`)
       return reply.status(404).send({ error: 'Session not found' })
     }
 
     if (!content) {
+      console.warn(`[Pocket] Messages: missing content for session ${id}`)
       return reply.status(400).send({ error: 'content is required' })
     }
+
+    console.log(`[Pocket] Messages: turn received for session ${id} (model=${session.model})`)
 
     // ─── Workspace setup: wait for the async setup kicked off at session creation ───
     const setupPromise = workspaceSetupPromises.get(id)
     if (!session.localPath && setupPromise) {
       try {
+        console.log(`[Pocket] Messages: awaiting workspace setup for session ${id}`)
         await setupPromise
+        console.log(`[Pocket] Messages: workspace setup complete for session ${id}`)
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
+        console.error(`[Pocket] Messages: workspace setup failed for session ${id}: ${message}`)
         return reply.status(500).send({ error: `Workspace setup failed: ${message}` })
       }
     }
@@ -324,8 +334,10 @@ export async function buildApp(options: BuildOptions) {
     // Refresh session after setup completes
     const updatedSession = sessionManager.getSession(id)
     if (!updatedSession) {
+      console.warn(`[Pocket] Messages: session ${id} not found after workspace setup`)
       return reply.status(404).send({ error: 'Session not found' })
     }
+    console.log(`[Pocket] Messages: workspace ready for session ${id} at ${updatedSession.localPath}`)
     const workspaceRoot = updatedSession.localPath
     if (!workspaceRoot) {
       return reply.status(500).send({ error: 'Workspace setup did not produce a local path' })
@@ -420,6 +432,7 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
       },
     })
 
+    console.log(`[Pocket] Messages: AgentRunner created, calling runTurn() for session ${id}`)
     sessionManager.setRunner(id, runner)
 
     // Run the turn asynchronously
@@ -428,8 +441,13 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
         nextSeq: runner.getSeq(),
         status: runner.isAborted ? 'done' : 'idle',
       })
+      console.log(`[Pocket] Messages: turn resolved for session ${id} (status=${updated?.status}, aborted=${runner.isAborted})`)
     }).catch((error) => {
       const message = error instanceof Error ? error.message : String(error)
+      console.error(`[Pocket] Messages: turn error for session ${id}: ${message}`)
+      if (error instanceof Error && error.stack) {
+        console.error(`[Pocket] Messages: stack trace: ${error.stack}`)
+      }
       sessionManager.updateSession(id, { status: 'error' })
     })
 
@@ -446,15 +464,20 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
 
     const session = sessionManager.getSession(id)
     if (!session) {
+      console.warn(`[Pocket] Improve: session ${id} not found`)
       return reply.status(404).send({ error: 'Session not found' })
     }
 
     if (!draft || !draft.trim()) {
+      console.warn(`[Pocket] Improve: missing draft for session ${id}`)
       return reply.status(400).send({ error: 'draft is required' })
     }
 
+    console.log(`[Pocket] Improve: request received for session ${id} (model=${session.model})`)
+
     const apiKey = options.env?.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY
     if (!apiKey) {
+      console.error(`[Pocket] Improve: OPENROUTER_API_KEY not configured for session ${id}`)
       return reply.status(500).send({ error: 'OPENROUTER_API_KEY not configured' })
     }
 
@@ -462,6 +485,7 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
 
     // Get full session context from the event log (includes tool calls + results)
     const events = eventLog.replaySync(id)
+    console.log(`[Pocket] Improve: loaded ${events.length} events from session ${id}'s event log`)
     const sessionMsgs = buildConversationFromEvents(events)
 
     const contextLines = sessionMsgs
@@ -564,6 +588,7 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
       const MAX_TOOL_TURNS = 5
 
       for (let turn = 0; turn < MAX_TOOL_TURNS && finalContent === null; turn++) {
+        console.log(`[Pocket] Improve: starting LLM call (turn ${turn + 1}/${MAX_TOOL_TURNS}) for session ${id} (model=${session.model})`)
         const stream = provider.streamChat({
           model: session.model,
           messages,
@@ -586,9 +611,12 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
         }
 
         if (toolCalls.length === 0) {
+          console.log(`[Pocket] Improve: turn ${turn + 1} complete — no tool calls, final text length=${assistantText.length}`)
           finalContent = assistantText
           break
         }
+
+        console.log(`[Pocket] Improve: turn ${turn + 1} yielded ${toolCalls.length} tool call(s): ${toolCalls.map(tc => tc.name).join(', ')}`)
 
         // Add assistant message with tool calls
         messages.push({
@@ -604,6 +632,7 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
         // Execute tools and add results
         for (const tc of toolCalls) {
           if (!toolCtx) {
+            console.warn(`[Pocket] Improve: no workspace for tool "${tc.name}" in session ${id}`)
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
@@ -614,6 +643,7 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
 
           const tool = readOnlyRegistry.get(tc.name)
           if (!tool) {
+            console.warn(`[Pocket] Improve: unknown tool "${tc.name}" in session ${id}`)
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
@@ -645,11 +675,13 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
           }
 
           try {
+            console.log(`[Pocket] Improve: executing tool "${tc.name}" for session ${id}`)
             const gen = tool.call(validation.data, toolCtx)
             let lastResult = await gen.next()
             while (!lastResult.done) {
               lastResult = await gen.next()
             }
+            console.log(`[Pocket] Improve: tool "${tc.name}" done for session ${id}`)
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
@@ -658,10 +690,15 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
                 : JSON.stringify({ result: lastResult.value }),
             })
           } catch (error) {
+            const errMsg = error instanceof Error ? error.message : String(error)
+            console.error(`[Pocket] Improve: tool "${tc.name}" error in session ${id}: ${errMsg}`)
+            if (error instanceof Error && error.stack) {
+              console.error(`[Pocket] Improve: tool error stack: ${error.stack}`)
+            }
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
-              content: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }),
+              content: JSON.stringify({ error: errMsg }),
             })
           }
         }
@@ -669,6 +706,7 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
 
       // If we exhausted all turns without a text response, force a final text-only call
       if (finalContent === null) {
+        console.log(`[Pocket] Improve: tool turns exhausted (${MAX_TOOL_TURNS}), forcing final text-only response for session ${id}`)
         messages.push({
           role: 'user',
           content: 'Please provide your final response based on what you have explored.',
@@ -692,9 +730,14 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
         finalContent = text
       }
 
+      console.log(`[Pocket] Improve: returning response for session ${id} (model=${actualModel || session.model}, finalContent length=${finalContent?.length ?? 0})`)
       return { content: finalContent, model: actualModel || session.model }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      console.error(`[Pocket] Improve: error for session ${id}: ${message}`)
+      if (error instanceof Error && error.stack) {
+        console.error(`[Pocket] Improve: stack trace: ${error.stack}`)
+      }
       return reply.status(500).send({ error: message })
     }
   })
@@ -704,8 +747,10 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
     const { id } = request.params as { id: string }
     const runner = sessionManager.getRunner(id)
     if (!runner) {
+      console.warn(`[Pocket] Abort: no active runner found for session ${id}`)
       return reply.status(404).send({ error: 'No active agent for this session' })
     }
+    console.log(`[Pocket] Abort: aborting runner for session ${id}`)
     runner.abort()
     return { ok: true }
   })
@@ -721,9 +766,11 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
 
     const runner = sessionManager.getRunner(id)
     if (!runner) {
+      console.warn(`[Pocket] Permission: no active runner for session ${id}`)
       return reply.status(404).send({ error: 'No active agent for this session' })
     }
 
+    console.log(`[Pocket] Permission: resolving permission ${permissionId} for session ${id} (resolution=${resolution}, alwaysAllow=${!!alwaysAllow})`)
     await runner.resolvePermission(permissionId, resolution, alwaysAllow)
     return { ok: true }
   })

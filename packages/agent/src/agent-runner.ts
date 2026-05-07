@@ -109,6 +109,8 @@ export class AgentRunner {
   }
 
   async runTurn(userMessage: { role: 'user'; content: string }): Promise<void> {
+    console.log(`[Pocket] AgentRunner: runTurn() started for session ${this.sessionId}`)
+
     // Reset loop-detection state for each new user turn
     this.recentToolCallKeys = []
     this.monitor.resetForNewUserTurn()
@@ -140,6 +142,7 @@ export class AgentRunner {
 
     try {
       while (turnCount < this.maxTurns && !this.abortController.signal.aborted) {
+        console.log(`[Pocket] AgentRunner: turn ${turnCount + 1}/${this.maxTurns} for session ${this.sessionId}`)
         const messages = this.buildMessages(userMessage)
         const toolDefs = this.tools.toDefinitions()
 
@@ -220,10 +223,13 @@ export class AgentRunner {
 
         // If no tool calls, break
         if (toolCalls.length === 0) {
+          console.log(`[Pocket] AgentRunner: no tool calls, breaking loop for session ${this.sessionId}`)
           break
         }
 
         turnCount++
+
+        console.log(`[Pocket] AgentRunner: executing ${toolCalls.length} tool call(s) for session ${this.sessionId} (turn ${turnCount})`)
 
         // Execute tools
         const results = await this.executeTools(toolCalls)
@@ -258,8 +264,13 @@ export class AgentRunner {
 
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      console.error(`[Pocket] AgentRunner: runTurn() error for session ${this.sessionId}: ${message}`)
+      if (error instanceof Error && error.stack) {
+        console.error(`[Pocket] AgentRunner: stack trace: ${error.stack}`)
+      }
 
       if (this.abortController.signal.aborted) {
+        console.log(`[Pocket] AgentRunner: turn aborted for session ${this.sessionId}`)
         this.emit({
           type: 'status',
           payload: { status: 'idle', message: 'Aborted' },
@@ -274,6 +285,7 @@ export class AgentRunner {
     }
 
     if (!this.abortController.signal.aborted) {
+      console.log(`[Pocket] AgentRunner: runTurn() completed for session ${this.sessionId} (turns=${turnCount})`)
       this.emit({
         type: 'status',
         payload: { status: 'idle' },
