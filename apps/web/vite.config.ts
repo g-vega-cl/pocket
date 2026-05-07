@@ -9,6 +9,7 @@ import viteReact from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
 const config = defineConfig({
+  envDir: '../..', // Load .env from repo root so createServerFn has access to GITHUB_TOKEN etc.
   server: {
     allowedHosts: ['bolt.clvg.uk', 'localhost', '.localhost'],
     proxy: {

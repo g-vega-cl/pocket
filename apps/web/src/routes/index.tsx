@@ -18,9 +18,41 @@ export const Route = createFileRoute('/')({
   component: HomePage,
 })
 
+function LoadingSkeleton() {
+  return (
+    <div className="max-w-2xl mx-auto p-6 space-y-8 animate-pulse">
+      <div className="space-y-2">
+        <div className="h-8 w-32 bg-gray-200 dark:bg-gray-700 rounded" />
+        <div className="h-4 w-64 bg-gray-200 dark:bg-gray-700 rounded" />
+      </div>
+      <div className="space-y-4">
+        <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+        <div className="h-20 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+        <div className="grid grid-cols-2 gap-3">
+          <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+          <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+        </div>
+        <div className="h-10 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+      </div>
+      <div className="space-y-2">
+        <div className="h-6 w-32 bg-gray-200 dark:bg-gray-700 rounded" />
+        <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+        <div className="h-16 bg-gray-200 dark:bg-gray-700 rounded-lg" />
+      </div>
+    </div>
+  )
+}
+
 function HomePage() {
   const navigate = useNavigate()
-  const { sessions, repos } = Route.useLoaderData()
+  const loaderData = Route.useLoaderData()
+
+  // If loaderData is still pending (during SSR fetch on client navigation), show skeleton
+  if (!loaderData) {
+    return <LoadingSkeleton />
+  }
+
+  const { sessions, repos } = loaderData
   const [repoUrl, setRepoUrl] = useState('')
   const [task, setTask] = useState('')
   const [model, setModel] = useState('deepseek/deepseek-v4-flash')

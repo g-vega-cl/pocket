@@ -24,7 +24,10 @@ interface GitHubRepo {
 
 export const fetchRepos = createServerFn({ method: 'GET' }).handler(async () => {
   const token = process.env.GITHUB_TOKEN
-  if (!token) return { repos: [] as GitHubRepo[] }
+  if (!token) {
+    console.error('[SSR] GITHUB_TOKEN environment variable is not set')
+    return { repos: [] as GitHubRepo[] }
+  }
 
   try {
     const res = await fetch('https://api.github.com/user/repos?sort=pushed&per_page=5&direction=desc', {
@@ -35,7 +38,11 @@ export const fetchRepos = createServerFn({ method: 'GET' }).handler(async () => 
       },
     })
 
-    if (!res.ok) return { repos: [] as GitHubRepo[] }
+    if (!res.ok) {
+      const body = await res.text()
+      console.error(`[SSR] GitHub API error: ${res.status} ${body}`)
+      return { repos: [] as GitHubRepo[] }
+    }
 
     const data = await res.json() as Array<{
       full_name: string
@@ -56,7 +63,9 @@ export const fetchRepos = createServerFn({ method: 'GET' }).handler(async () => 
         language: r.language,
       })),
     }
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[SSR] fetchRepos failed: ${msg}`)
     return { repos: [] as GitHubRepo[] }
   }
 })
@@ -64,9 +73,15 @@ export const fetchRepos = createServerFn({ method: 'GET' }).handler(async () => 
 export const listSessions = createServerFn({ method: 'GET' }).handler(async () => {
   try {
     const res = await fetch(`${API_URL}/api/sessions`)
-    if (!res.ok) return { sessions: [] as SessionListItem[] }
+    if (!res.ok) {
+      const body = await res.text()
+      console.error(`[SSR] listSessions API error: ${res.status} ${body}`)
+      return { sessions: [] as SessionListItem[] }
+    }
     return await res.json() as { sessions: SessionListItem[] }
-  } catch {
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[SSR] listSessions failed: ${msg}`)
     return { sessions: [] as SessionListItem[] }
   }
 })
