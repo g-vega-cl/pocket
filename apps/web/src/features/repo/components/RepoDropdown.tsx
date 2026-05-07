@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { GitHubRepo } from '#/shared/api/client.js'
 import { useRepoDropdown } from '#/features/repo/hooks/useRepoDropdown.js'
 
@@ -14,22 +15,44 @@ function formatDate(dateStr: string): string {
 
 interface RepoDropdownProps {
   onSelect: (repo: GitHubRepo) => void
+  initialRepos?: GitHubRepo[]
 }
 
-export function RepoDropdown({ onSelect }: RepoDropdownProps) {
+export function RepoDropdown({ onSelect, initialRepos }: RepoDropdownProps) {
   const {
+    filteredRepos: queryFilteredRepos,
+    isLoading,
     search,
     updateSearch,
     select,
     isOpen,
     open,
-    filteredRepos,
+    repos: queryRepos,
     dropdownRef,
   } = useRepoDropdown()
+
+  const hasQueryData = queryRepos.length > 0
+
+  const filteredRepos = useMemo(() => {
+    if (hasQueryData) return queryFilteredRepos
+    return (initialRepos ?? []).filter(
+      (r) =>
+        r.fullName.toLowerCase().includes(search.toLowerCase()) ||
+        (r.description || '').toLowerCase().includes(search.toLowerCase()),
+    )
+  }, [hasQueryData, queryFilteredRepos, initialRepos, search])
+
+  const displayRepos = hasQueryData ? queryRepos : (initialRepos ?? [])
 
   function handleSelect(repo: GitHubRepo) {
     select(repo)
     onSelect(repo)
+  }
+
+  function handleOpen() {
+    if (hasQueryData || (initialRepos && initialRepos.length > 0)) {
+      open()
+    }
   }
 
   return (
@@ -38,7 +61,8 @@ export function RepoDropdown({ onSelect }: RepoDropdownProps) {
         type="text"
         value={search}
         onChange={e => updateSearch(e.target.value)}
-        onFocus={() => open()}
+        onFocus={handleOpen}
+        onMouseDown={handleOpen}
         placeholder="Select a repo or paste a URL..."
         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none"
       />
@@ -80,7 +104,12 @@ export function RepoDropdown({ onSelect }: RepoDropdownProps) {
       )}
       {isOpen && filteredRepos.length === 0 && (
         <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-          No repos match your search
+          {!hasQueryData && !initialRepos?.length
+            ? isLoading
+              ? 'Loading repos...'
+              : 'No repos found'
+            : 'No repos match your search'
+          }
         </div>
       )}
     </div>
