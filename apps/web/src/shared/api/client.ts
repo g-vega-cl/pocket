@@ -65,9 +65,8 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  fetchRepos(token?: string): Promise<{ repos: GitHubRepo[] }> {
-    const qs = token ? `?token=${encodeURIComponent(token)}` : ''
-    return request(`/github/repos${qs}`)
+  fetchRepos(): Promise<{ repos: GitHubRepo[] }> {
+    return request('/github/repos')
   },
 
   createSession(input: CreateSessionInput): Promise<{ id: string; status: string }> {

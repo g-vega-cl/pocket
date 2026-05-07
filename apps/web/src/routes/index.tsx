@@ -1,21 +1,15 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { api } from '#/shared/api/client.js'
 import { listSessions } from '#/features/session/api/server-fns.js'
-import { fetchRepos } from '#/features/repo/api/server-fns.js'
 import { RepoDropdown } from '#/features/repo/components/RepoDropdown.js'
 import type { GitHubRepo } from '#/shared/api/client.js'
 
 export const Route = createFileRoute('/')({
   loader: async () => {
-    const [sessionsData, reposData] = await Promise.all([
-      listSessions(),
-      fetchRepos(),
-    ])
+    const sessionsData = await listSessions()
     return {
       sessions: sessionsData.sessions,
-      repos: reposData.repos,
     }
   },
   component: HomePage,
@@ -23,34 +17,16 @@ export const Route = createFileRoute('/')({
 
 function HomePage() {
   const navigate = useNavigate()
-  const { sessions, repos } = Route.useLoaderData()
+  const { sessions } = Route.useLoaderData()
   const [repoUrl, setRepoUrl] = useState('')
   const [task, setTask] = useState('')
   const [model, setModel] = useState('deepseek/deepseek-v4-flash')
   const [githubToken, setGithubToken] = useState('')
   const [loading, setLoading] = useState(false)
-  const [fetchingRepos, setFetchingRepos] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const queryClient = useQueryClient()
 
   function handleRepoSelect(repo: GitHubRepo) {
     setRepoUrl(repo.cloneUrl)
-  }
-
-  async function handleFetchRepos() {
-    if (!githubToken) return
-    setFetchingRepos(true)
-    setError(null)
-    try {
-      await queryClient.fetchQuery({
-        queryKey: ['github', 'repos'],
-        queryFn: () => api.fetchRepos(githubToken),
-      })
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to fetch repos')
-    } finally {
-      setFetchingRepos(false)
-    }
   }
 
   async function handleCreate(e: React.FormEvent) {
@@ -82,7 +58,7 @@ function HomePage() {
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
             Repository
           </label>
-          <RepoDropdown onSelect={handleRepoSelect} initialRepos={repos} />
+          <RepoDropdown onSelect={handleRepoSelect} />
         </div>
 
         <div>
@@ -122,17 +98,6 @@ function HomePage() {
               className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none"
             />
           </div>
-        </div>
-
-        <div>
-          <button
-            type="button"
-            onClick={handleFetchRepos}
-            disabled={fetchingRepos || !githubToken}
-            className="w-full py-2 px-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-50 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            {fetchingRepos ? 'Fetching...' : 'Fetch Repos'}
-          </button>
         </div>
 
         {error && (

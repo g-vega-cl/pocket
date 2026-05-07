@@ -118,8 +118,7 @@ export async function buildApp(options: BuildOptions) {
 
   // List GitHub repos
   app.get('/api/github/repos', async (request, reply) => {
-    const queryToken = (request.query as Record<string, string>).token
-    const githubToken = queryToken || options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN
+    const githubToken = options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN
     if (!githubToken) {
       return reply.status(400).send({ error: 'GITHUB_TOKEN not configured' })
     }
