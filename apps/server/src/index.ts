@@ -25,9 +25,10 @@ import {
   initLocalRepo,
   isPodmanAvailable,
   killAllContainers,
+  stopSandboxContainer,
   ensureContainer,
 } from '@pocket/tools'
-import type { Event, PocketConfig, Message, ToolContext } from '@pocket/core'
+import type { Event, PocketConfig, WatchdogConfig, Message, ToolContext } from '@pocket/core'
 import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY, DEFAULT_WATCHDOG_CONFIG } from '@pocket/core'
 
 function getConfig(): PocketConfig {
@@ -117,10 +118,7 @@ export async function buildApp(options: BuildOptions) {
 
   // List GitHub repos
   app.get('/api/github/repos', async (request, reply) => {
-    const authHeader = request.headers.authorization
-    const githubToken = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN)
+    const githubToken = options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN
     if (!githubToken) {
       return reply.status(400).send({ error: 'GITHUB_TOKEN not configured' })
     }
@@ -840,7 +838,7 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
           return resolved
         },
       }
-      const gen = githubCreatePRTool.call({ title: session.task, body: `Task: ${session.task}\nRepo: ${session.repoUrl}\nBranch: ${session.branchName ?? 'unknown'}` }, ctx)
+      const gen = githubCreatePRTool.call({}, ctx)
       let result = await gen.next()
       while (!result.done) {
         result = await gen.next()

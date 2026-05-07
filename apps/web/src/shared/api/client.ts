@@ -65,12 +65,8 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  fetchRepos(token?: string): Promise<{ repos: GitHubRepo[] }> {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`
-    }
-    return request('/github/repos', { headers })
+  fetchRepos(): Promise<{ repos: GitHubRepo[] }> {
+    return request('/github/repos')
   },
 
   createSession(input: CreateSessionInput): Promise<{ id: string; status: string }> {

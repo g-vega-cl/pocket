@@ -3,14 +3,13 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '#/shared/api/client.js'
 import type { GitHubRepo } from '#/shared/api/client.js'
 
-export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string) {
-  const hasInitialData = initialData && initialData.length > 0
+const REPOS_QUERY_KEY = ['github', 'repos'] as const
 
+export function useRepoDropdown() {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['github', 'repos', githubToken],
-    queryFn: () => api.fetchRepos(githubToken),
+    queryKey: REPOS_QUERY_KEY,
+    queryFn: api.fetchRepos,
     staleTime: 5 * 60 * 1000,
-    initialData: hasInitialData ? { repos: initialData } : undefined,
   })
 
   const [search, setSearch] = useState('')
