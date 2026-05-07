@@ -143,7 +143,6 @@ export function reduceEvents(events: Event[]): ChatState {
 
       case 'assistant_text_done':
         if (hasStreamingAssistant) {
-          // Capture model from payload if present
           if (event.payload.model) {
             currentModel = String(event.payload.model)
           }
@@ -216,7 +215,6 @@ export function reduceEvents(events: Event[]): ChatState {
         const perm = state.pendingPermissions.find(p => p.permissionId === permId)
         if (perm) {
           perm.status = event.payload.resolution === 'allow' ? 'approved' : 'denied'
-          // Remove resolved from pending list
           state.pendingPermissions = state.pendingPermissions.filter(p => p.permissionId !== permId)
         }
         break
@@ -250,7 +248,6 @@ export function reduceEvents(events: Event[]): ChatState {
     }
   }
 
-  // Flush any remaining streaming assistant content
   if (hasStreamingAssistant && (currentAssistantContent || currentReasoning)) {
     state.messages.push({
       id: makeId(),

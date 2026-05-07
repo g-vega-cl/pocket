@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { api } from '#/lib/api.js'
+import { api } from '#/shared/api/client.js'
 
 interface ImproverMessage {
   role: 'user' | 'assistant'

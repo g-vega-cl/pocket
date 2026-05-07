@@ -1,10 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
-import { usePocketSession } from '#/hooks/usePocketSession.js'
-import { ThinkingDrawer } from '#/components/ThinkingDrawer.js'
-import { ImproverView } from '#/components/ImproverView.js'
-import type { PendingPermission } from '#/state/events.js'
-import { SessionInfoContext } from '#/state/session-context.js'
+import { usePocketSession } from '#/features/session/hooks/usePocketSession.js'
+import { ThinkingDrawer } from '#/features/session/components/ThinkingDrawer.js'
+import { ImproverView } from '#/features/session/components/ImproverView.js'
+import type { PendingPermission } from '#/features/session/state/events.js'
+import { SessionInfoContext } from '#/features/session/state/session-context.js'
 
 function formatMessageTime(ts: number): string {
   const date = new Date(ts)

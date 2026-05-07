@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router'
 import { useContext } from 'react'
-import ThemeToggle from './ThemeToggle'
-import { SessionInfoContext } from '../state/session-context'
+import ThemeToggle from '#/shared/components/ThemeToggle.js'
+import { SessionInfoContext } from '#/features/session/state/session-context.js'
 
 function StatusBadge({ status, isThinking }: { status: string; isThinking: boolean }) {
   const colors: Record<string, string> = {

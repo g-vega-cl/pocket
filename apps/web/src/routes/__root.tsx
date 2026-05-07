@@ -3,10 +3,11 @@ import {
   Scripts,
   createRootRouteWithContext,
 } from '@tanstack/react-router'
-import Header from '../components/Header'
-import appCss from '../styles.css?url'
-
+import { QueryClientProvider } from '@tanstack/react-query'
 import type { QueryClient } from '@tanstack/react-query'
+import { queryClient } from '#/shared/api/query-client.js'
+import Header from '#/shared/components/Header.js'
+import appCss from '#/shared/styles/global.css?url'
 
 interface MyRouterContext {
   queryClient: QueryClient
@@ -54,8 +55,10 @@ function RootDocument({ children }: { children: React.ReactNode }) {
         <HeadContent />
       </head>
       <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">
-        <Header />
-        {children}
+        <QueryClientProvider client={queryClient}>
+          <Header />
+          {children}
+        </QueryClientProvider>
         <Scripts />
       </body>
     </html>

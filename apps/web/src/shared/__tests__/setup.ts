@@ -19,7 +19,7 @@ global.EventSource = vi.fn(() => {
   return mockEventSourceInstance
 }) as any
 
-global.mockEventSource = {
+;(global as any).mockEventSource = {
   getInstance: () => mockEventSourceInstance,
   triggerMessage: (data: any) => {
     if (mockEventSourceInstance?.onmessage) {

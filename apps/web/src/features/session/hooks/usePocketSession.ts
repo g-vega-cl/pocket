@@ -1,9 +1,9 @@
 import { useState, useCallback, useRef } from 'react'
 import { useSessionStream } from './useSessionStream.js'
-import { reduceEvents } from '#/state/events.js'
-import type { Event, ChatState } from '#/state/events.js'
-import { api } from '#/lib/api.js'
-import type { SessionDetail, SessionListItem } from '#/lib/api.js'
+import { reduceEvents } from '#/features/session/state/events.js'
+import type { Event, ChatState } from '#/features/session/state/events.js'
+import { api } from '#/shared/api/client.js'
+import type { SessionDetail, SessionListItem } from '#/shared/api/client.js'
 
 export function usePocketSession(sessionId: string | null) {
   const [chatState, setChatState] = useState<ChatState>({

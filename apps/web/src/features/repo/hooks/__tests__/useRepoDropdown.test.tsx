@@ -3,8 +3,8 @@ import { renderHook, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useRepoDropdown } from '../useRepoDropdown.js'
-import { api } from '#/lib/api.js'
-import type { GitHubRepo } from '#/lib/api.js'
+import { api } from '#/shared/api/client.js'
+import type { GitHubRepo } from '#/shared/api/client.js'
 
 function createWrapper() {
   const queryClient = new QueryClient({
