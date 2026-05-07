@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import type { Event } from '#/state/events.js'
+import type { Event } from '#/features/session/state/events.js'
 
 interface UseSessionStreamOptions {
   sessionId: string

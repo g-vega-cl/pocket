@@ -102,7 +102,6 @@ describe('reduceEvents', () => {
       ev({ type: 'assistant_text_delta', seq: 6, payload: { text: 'Fixed!' } }),
       ev({ type: 'assistant_text_done', seq: 7, payload: { text: 'Fixed!' } }),
     ])
-    // Should have: user message, assistant message (with tool call), assistant message
     expect(state.messages).toHaveLength(3)
     expect(state.messages[1].role).toBe('assistant')
     expect(state.messages[1].content).toBe('Let me read the file')
@@ -227,7 +226,6 @@ describe('reduceEvents', () => {
       const state = reduceEvents([
         ev({ type: 'user_message', seq: 1, payload: { content: 'Hi' } }),
         ev({ type: 'assistant_text_delta', seq: 2, payload: { text: 'Partial', model: 'deepseek/deepseek-chat' } }),
-        // user_message arrives before assistant_text_done — should flush with model
         ev({ type: 'user_message', seq: 3, payload: { content: 'Interrupt' } }),
       ])
       expect(state.messages).toHaveLength(3)

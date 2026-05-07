@@ -730,23 +730,54 @@ The provider is the single point of model-specific knowledge. The agent loop onl
 
 ## 11. Frontend (TanStack Start)
 
+The frontend follows a **vertical (feature-based)** architecture. Each feature owns its components, hooks, state, and API — cross-cutting concerns live in `shared/`. Routes are thin page entries that compose from feature and shared modules.
+
 ```
-apps/web/
-  src/
-    routes/
-      index.tsx              ← session list / new session form (TanStack Query)
-      sessions/$id.tsx       ← active chat UI (components inlined)
-    state/
-      events.ts              ← reducer: events[] → derived UI state
-    hooks/
-      useSessionStream.ts    ← EventSource wrapper, handles reconnect/replay
-      usePocketSession.ts    ← main hook combining SSE + REST
-      useRepoDropdown.ts     ← GitHub repo dropdown: query, filter, select
-    lib/
-      api.ts                 ← typed fetch wrapper for REST endpoints
+apps/web/src/
+├── features/
+│   ├── session/                      ← AI chat, event stream, prompt improvement
+│   │   ├── components/
+│   │   │   ├── ThinkingDrawer.tsx    ← collapsible reasoning display
+│   │   │   └── ImproverView.tsx      ← AI-powered prompt refinement
+│   │   ├── hooks/
+│   │   │   ├── usePocketSession.ts   ← main hook combining SSE + REST
+│   │   │   └── useSessionStream.ts   ← EventSource wrapper, buffers + flushes
+│   │   ├── state/
+│   │   │   ├── events.ts            ← reducer: events[] → derived UI state
+│   │   │   └── session-context.ts   ← React context for sharing state with Header
+│   │   └── api/
+│   │       └── server-fns.ts        ← listSessions SSR server function
+│   │
+│   └── repo/                         ← GitHub repository discovery + selection
+│       ├── components/
+│       │   └── RepoDropdown.tsx      ← searchable repo picker UI
+│       ├── hooks/
+│       │   └── useRepoDropdown.ts    ← repo query, filter, select state
+│       └── api/
+│           └── server-fns.ts        ← fetchRepos SSR server function
+│
+├── shared/                           ← cross-cutting: API client, layout, theme
+│   ├── api/
+│   │   └── client.ts                ← typed fetch wrapper for all REST endpoints
+│   ├── components/
+│   │   ├── Header.tsx               ← sticky nav bar, StatusBadge, TokenBadge
+│   │   ├── Footer.tsx               ← site footer
+│   │   └── ThemeToggle.tsx          ← light/dark/auto theme switch
+│   └── styles/
+│       └── global.css               ← CSS custom properties, theme tokens, utilities
+│
+├── routes/                           ← thin page entries (TanStack Start convention)
+│   ├── __root.tsx                   ← root layout: HTML shell, theme init, Header
+│   ├── index.tsx                    ← home page: session creation form + recent sessions
+│   ├── about.tsx                    ← static about page
+│   └── sessions/
+│       └── $id.tsx                  ← chat view: messages, permissions, composer
+│
+├── router.tsx
+└── routeTree.gen.ts                 ← auto-generated route tree
 ```
 
-Session status badges (`StatusBadge`, `TokenBadge`) live in `Header.tsx` and read from `SessionInfoContext` — the chat view provides the context, so the navbar shows live session state on session pages. `ToolCallCard` and `PermissionPrompt` remain co-located in `sessions/$id.tsx`.
+Session status badges (`StatusBadge`, `TokenBadge`) live in `shared/components/Header.tsx` and read from `SessionInfoContext` — the chat view provides the context, so the navbar shows live session state on session pages. `ToolCallCard` and `PermissionPrompt` remain co-located in `sessions/$id.tsx`.
 
 ### Two important UI principles
 
@@ -777,7 +808,7 @@ The homepage uses `@tanstack/react-query` for server-state management:
 - **`useMutation` for writes** — `createSession` is a mutation that invalidates the sessions cache and navigates on success.
 - **Error surfacing** — Both `useQuery` and `useMutation` expose `error` states that are rendered inline instead of silently swallowed.
 
-This replaces raw `useEffect` + `fetch` calls that were error-prone and harder to test. Custom hooks like `useRepoDropdown` encapsulate query logic + local UI state, keeping the component surface area small.
+This replaces raw `useEffect` + `fetch` calls that were error-prone and harder to test. Custom hooks like `useRepoDropdown` (in `features/repo/`) encapsulate query logic + local UI state, keeping the component surface area small. The `api` client is in `shared/api/client.ts` — a single typed wrapper for all REST endpoints.
 
 ---
 
@@ -853,7 +884,7 @@ Single-process, single-port, served as one Node app. Monorepo uses pnpm workspac
 ```
 pocket/
 ├── apps/
-│   ├── web/               ← TanStack Start frontend (Vite dev, Netlify SSR)
+│   ├── web/               ← TanStack Start frontend (vertical feature-based, Vite dev, Netlify SSR)
 │   └── server/            ← Fastify API + agent runtime (tsx in dev, tsc for prod)
 ├── packages/
 │   ├── core/              ← shared types: Event, Tool, Message, Session (zod)
@@ -1073,7 +1104,7 @@ This pure function takes `Event[]` and optional `{ systemPrompt, nudgeText }`, r
 
 ### UI
 
-The improver is a full-page view (`apps/web/src/components/ImproverView.tsx`) that shares the same layout pattern as the main chat (`max-w-3xl h-[calc(100vh-2rem)] flex flex-col`). It completely replaces the chat view when active — a state toggle in `sessions/$id.tsx` switches between them. This is a mobile-first pattern: only one view and one scroll context exist at any time.
+The improver is a full-page view (`apps/web/src/features/session/components/ImproverView.tsx`) that shares the same layout pattern as the main chat (`max-w-3xl h-[calc(100vh-2rem)] flex flex-col`). It completely replaces the chat view when active — a state toggle in `sessions/$id.tsx` switches between them. This is a mobile-first pattern: only one view and one scroll context exist at any time.
 
 The min-2rem navbar height reserves space for the compact `Header` (≈32px). Messages use an inner `min-h-full flex flex-col justify-end` so content starts at the bottom and fills upward, with `overflow-y-auto` on the outer container for manual scroll-back. No auto-scroll fires during streaming — the user controls scroll position.
 

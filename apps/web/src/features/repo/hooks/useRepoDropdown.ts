@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { api } from '#/lib/api.js'
-import type { GitHubRepo } from '#/lib/api.js'
+import { api } from '#/shared/api/client.js'
+import type { GitHubRepo } from '#/shared/api/client.js'
 
 const REPOS_QUERY_KEY = ['github', 'repos'] as const
 

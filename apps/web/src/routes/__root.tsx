@@ -3,8 +3,8 @@ import {
   Scripts,
   createRootRouteWithContext,
 } from '@tanstack/react-router'
-import Header from '../components/Header'
-import appCss from '../styles.css?url'
+import Header from '#/shared/components/Header.js'
+import appCss from '#/shared/styles/global.css?url'
 
 import type { QueryClient } from '@tanstack/react-query'
 
