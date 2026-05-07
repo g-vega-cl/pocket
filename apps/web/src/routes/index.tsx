@@ -1,15 +1,26 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useState, useEffect, useRef } from 'react'
 import { api } from '#/lib/api.js'
-import type { SessionListItem, GitHubRepo } from '#/lib/api.js'
+import { fetchRepos, listSessions } from '#/lib/server-fns.js'
+import type { GitHubRepo } from '#/lib/api.js'
 
 export const Route = createFileRoute('/')({
+  loader: async () => {
+    const [sessionsData, reposData] = await Promise.all([
+      listSessions(),
+      fetchRepos(),
+    ])
+    return {
+      sessions: sessionsData.sessions,
+      repos: reposData.repos,
+    }
+  },
   component: HomePage,
 })
 
 function HomePage() {
   const navigate = useNavigate()
-  const [sessions, setSessions] = useState<SessionListItem[]>([])
+  const { sessions, repos } = Route.useLoaderData()
   const [repoUrl, setRepoUrl] = useState('')
   const [task, setTask] = useState('')
   const [model, setModel] = useState('deepseek/deepseek-v4-flash')
@@ -18,26 +29,9 @@ function HomePage() {
   const [error, setError] = useState<string | null>(null)
 
   // Repo dropdown state
-  const [repos, setRepos] = useState<GitHubRepo[]>([])
-  const [reposLoading, setReposLoading] = useState(false)
   const [repoSearch, setRepoSearch] = useState('')
   const [repoDropdownOpen, setRepoDropdownOpen] = useState(false)
   const repoDropdownRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    api.listSessions().then(r => setSessions(r.sessions)).catch(() => {})
-  }, [])
-
-  // Fetch repos on mount
-  useEffect(() => {
-    setReposLoading(true)
-    api.fetchRepos()
-      .then(r => setRepos(r.repos))
-      .catch(() => {
-        // GITHUB_TOKEN might not be configured — silently ignore
-      })
-      .finally(() => setReposLoading(false))
-  }, [])
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -117,7 +111,7 @@ function HomePage() {
             value={repoSearch || repoUrl}
             onChange={handleRepoUrlChange}
             onFocus={handleRepoUrlFocus}
-            placeholder={reposLoading ? 'Loading repos...' : 'Select a repo or paste a URL...'}
+            placeholder="Select a repo or paste a URL..."
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none"
           />
           {repoDropdownOpen && filteredRepos.length > 0 && (
@@ -156,7 +150,7 @@ function HomePage() {
               ))}
             </div>
           )}
-          {repoDropdownOpen && filteredRepos.length === 0 && !reposLoading && (
+          {repoDropdownOpen && filteredRepos.length === 0 && (
             <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
               No repos match your search
             </div>
