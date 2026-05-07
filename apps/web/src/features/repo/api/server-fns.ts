@@ -14,9 +14,15 @@ interface GitHubRepo {
 export const fetchRepos = createServerFn({ method: 'GET' }).handler(async () => {
   try {
     const res = await fetch(`${API_URL}/api/github/repos`)
-    if (!res.ok) return { repos: [] as GitHubRepo[] }
-    return await res.json() as { repos: GitHubRepo[] }
-  } catch {
+    if (!res.ok) {
+      console.error(`[fetchRepos] Fastify returned ${res.status}`)
+      return { repos: [] as GitHubRepo[] }
+    }
+    const data = await res.json() as { repos: GitHubRepo[] }
+    console.log(`[fetchRepos] SSR loaded ${data.repos.length} repos`)
+    return data
+  } catch (err) {
+    console.error(`[fetchRepos] Fetch failed:`, err instanceof Error ? err.message : err)
     return { repos: [] as GitHubRepo[] }
   }
 })

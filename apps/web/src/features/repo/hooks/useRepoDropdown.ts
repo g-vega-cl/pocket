@@ -18,7 +18,7 @@ export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
 
-  const repos = data?.repos ?? []
+  const repos = data?.repos ?? (initialData ?? [])
 
   const filteredRepos = useMemo(
     () =>
