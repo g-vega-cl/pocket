@@ -1,5 +1,7 @@
 import { createServerFn } from '@tanstack/react-start'
 
+const API_URL = process.env.API_URL || 'http://localhost:5173'
+
 interface GitHubRepo {
   fullName: string
   cloneUrl: string
@@ -10,39 +12,10 @@ interface GitHubRepo {
 }
 
 export const fetchRepos = createServerFn({ method: 'GET' }).handler(async () => {
-  const token = process.env.GITHUB_TOKEN
-  if (!token) return { repos: [] as GitHubRepo[] }
-
   try {
-    const res = await fetch('https://api.github.com/user/repos?sort=pushed&per_page=5&direction=desc', {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        Accept: 'application/vnd.github.v3+json',
-        'User-Agent': 'pocket',
-      },
-    })
-
+    const res = await fetch(`${API_URL}/api/github/repos`)
     if (!res.ok) return { repos: [] as GitHubRepo[] }
-
-    const data = await res.json() as Array<{
-      full_name: string
-      clone_url: string
-      description: string | null
-      pushed_at: string
-      stargazers_count: number
-      language: string | null
-    }>
-
-    return {
-      repos: data.map(r => ({
-        fullName: r.full_name,
-        cloneUrl: r.clone_url,
-        description: r.description ?? '',
-        pushedAt: r.pushed_at,
-        stars: r.stargazers_count,
-        language: r.language,
-      })),
-    }
+    return await res.json() as { repos: GitHubRepo[] }
   } catch {
     return { repos: [] as GitHubRepo[] }
   }
