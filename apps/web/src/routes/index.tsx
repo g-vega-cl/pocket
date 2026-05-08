@@ -23,7 +23,7 @@ export const Route = createFileRoute('/')({
 function HomePage() {
   const navigate = useNavigate()
   const { sessions, repos } = Route.useLoaderData()
-  const [repoUrl, setRepoUrl] = useState('')
+  const [repoUrl, setRepoUrl] = useState(repos[0]?.cloneUrl ?? '')
   const [task, setTask] = useState('')
   const [model, setModel] = useState('deepseek/deepseek-v4-flash')
   const [githubToken, setGithubToken] = useState('')

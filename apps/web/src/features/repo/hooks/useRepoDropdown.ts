@@ -15,7 +15,9 @@ export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string
 
   const [search, setSearch] = useState('')
   const [isOpen, setIsOpen] = useState(false)
-  const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null)
+  const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(
+    initialData?.length ? initialData[0] : null,
+  )
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const repos = data?.repos ?? (initialData ?? [])
@@ -31,8 +33,13 @@ export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string
     }
   }, [repos, selectedRepo])
 
+  const prevTokenRef = useRef(githubToken)
+
   useEffect(() => {
-    if (!githubToken) {
+    if (prevTokenRef.current !== githubToken) {
+      prevTokenRef.current = githubToken
+      setSelectedRepo(null)
+      setSearch('')
       autoSelectedRef.current = false
     }
   }, [githubToken])
