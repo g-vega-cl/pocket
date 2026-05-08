@@ -15,6 +15,8 @@ interface MyRouterContext {
 
 const THEME_INIT_SCRIPT = `(function(){try{var stored=window.localStorage.getItem('theme');var mode=(stored==='light'||stored==='dark'||stored==='auto')?stored:'auto';var prefersDark=window.matchMedia('(prefers-color-scheme: dark)').matches;var resolved=mode==='auto'?(prefersDark?'dark':'light'):mode;var root=document.documentElement;root.classList.remove('light','dark');root.classList.add(resolved);if(mode==='auto'){root.removeAttribute('data-theme')}else{root.setAttribute('data-theme',mode)}root.style.colorScheme=resolved;}catch(e){}})();`
 
+const HYDRATION_SAFE_INTERACTIONS = `(function(){document.addEventListener('focusin',function(e){var t=e.target;if(!t||t.nodeType!==1)return;if(t.tagName!=='INPUT'&&t.tagName!=='TEXTAREA')return;var d=t.closest('details[data-dropdown]');if(d)d.open=true});document.addEventListener('click',function(e){var n=document.querySelectorAll('details[data-dropdown][open]');for(var i=0;i<n.length;i++){if(!n[i].contains(e.target))n[i].open=false}});})();`
+
 export const Route = createRootRouteWithContext<MyRouterContext>()({
   notFoundComponent: () => (
     <div className="flex items-center justify-center min-h-[50vh]">
@@ -39,6 +41,15 @@ export const Route = createRootRouteWithContext<MyRouterContext>()({
     ],
     links: [
       {
+        rel: 'preconnect',
+        href: 'https://fonts.googleapis.com',
+      },
+      {
+        rel: 'preconnect',
+        href: 'https://fonts.gstatic.com',
+        crossOrigin: 'anonymous' as const,
+      },
+      {
         rel: 'stylesheet',
         href: appCss,
       },
@@ -52,6 +63,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
     <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+        <script dangerouslySetInnerHTML={{ __html: HYDRATION_SAFE_INTERACTIONS }} />
         <HeadContent />
       </head>
       <body className="font-sans antialiased [overflow-wrap:anywhere] selection:bg-[rgba(79,184,178,0.24)]">

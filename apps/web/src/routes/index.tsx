@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { api } from '#/shared/api/client.js'
 import { listSessions } from '#/features/session/api/server-fns.js'
 import { fetchRepos } from '#/features/repo/api/server-fns.js'
@@ -58,6 +58,7 @@ function HomePage() {
         </p>
       </div>
 
+      <Suspense fallback={null}>
       <form onSubmit={handleCreate} className="space-y-4">
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -117,8 +118,10 @@ function HomePage() {
           {loading ? 'Creating...' : 'New Session'}
         </button>
       </form>
+      </Suspense>
 
       {sessions.length > 0 && (
+        <Suspense fallback={null}>
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100 mb-3">
             Recent Sessions
@@ -152,6 +155,7 @@ function HomePage() {
             ))}
           </div>
         </div>
+        </Suspense>
       )}
     </div>
   )

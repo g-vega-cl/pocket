@@ -18,9 +18,17 @@ export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(
     initialData?.length ? initialData[0] : null,
   )
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const detailsRef = useRef<HTMLDetailsElement>(null)
 
   const repos = data?.repos ?? (initialData ?? [])
+
+  // Sync React state with native <details> DOM state after hydration
+  useEffect(() => {
+    const details = detailsRef.current
+    if (details && details.open !== isOpen) {
+      setIsOpen(details.open)
+    }
+  }, [])
 
   const mounted = useRef(false)
   useEffect(() => {
@@ -45,8 +53,8 @@ export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node)
+        detailsRef.current &&
+        !detailsRef.current.contains(e.target as Node)
       ) {
         setIsOpen(false)
       }
@@ -88,6 +96,6 @@ export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string
     close,
     select,
     selectedRepo,
-    dropdownRef,
+    detailsRef,
   }
 }
