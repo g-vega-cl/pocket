@@ -116,6 +116,9 @@ export async function buildApp(options: BuildOptions) {
   })
 
   // List GitHub repos
+  const REPOS_CACHE_TTL = 24 * 60 * 60 * 1000
+  const reposCache = new Map<string, { data: unknown; expiry: number }>()
+
   app.get('/api/github/repos', async (request, reply) => {
     const authHeader = request.headers.authorization
     const githubToken = authHeader?.startsWith('Bearer ')
@@ -123,6 +126,11 @@ export async function buildApp(options: BuildOptions) {
       : (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN)
     if (!githubToken) {
       return reply.status(400).send({ error: 'GITHUB_TOKEN not configured' })
+    }
+
+    if (!authHeader) {
+      const cached = reposCache.get(githubToken)
+      if (cached && Date.now() < cached.expiry) return cached.data
     }
 
     try {
@@ -148,7 +156,7 @@ export async function buildApp(options: BuildOptions) {
         language: string | null
       }>
 
-      return {
+      const data = {
         repos: repos.map(r => ({
           fullName: r.full_name,
           cloneUrl: r.clone_url,
@@ -158,6 +166,12 @@ export async function buildApp(options: BuildOptions) {
           language: r.language,
         })),
       }
+
+      if (!authHeader) {
+        reposCache.set(githubToken, { data, expiry: Date.now() + REPOS_CACHE_TTL })
+      }
+
+      return data
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return reply.status(500).send({ error: `Failed to fetch repos: ${message}` })
