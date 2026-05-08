@@ -30,7 +30,7 @@ function setupHookReturn(overrides: Record<string, unknown> = {}) {
     repos: [],
     isLoading: false,
     selectedRepo: null,
-    dropdownRef: { current: null },
+    detailsRef: { current: null },
     ...overrides,
   })
 }
@@ -112,10 +112,12 @@ describe('RepoDropdown', () => {
     expect(screen.getByText('No repos match your search')).toBeInTheDocument()
   })
 
-  it('does not render dropdown list when closed', () => {
+  it('renders repo content but keeps details closed when isOpen is false', () => {
     const repo = makeRepo()
     setupHookReturn({ isOpen: false, filteredRepos: [repo] })
     render(<RepoDropdown onSelect={vi.fn()} />)
-    expect(screen.queryByText(repo.fullName)).not.toBeInTheDocument()
+    const details = document.querySelector('details[data-dropdown]')
+    expect(details).not.toHaveAttribute('open')
+    expect(screen.getByText(repo.fullName)).toBeInTheDocument()
   })
 })

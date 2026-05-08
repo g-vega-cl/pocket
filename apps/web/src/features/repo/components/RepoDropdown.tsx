@@ -46,6 +46,11 @@ export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdo
   return (
     <details
       ref={detailsRef}
+      // React 19 unconditionally reads the native <details> open IDL attribute
+      // during hydration, even when we omit `open` from JSX. suppressHydrationWarning
+      // tells React the difference between native DOM state and SSR output is intentional
+      // progressive enhancement — the dropdown works natively before JS hydrates.
+      suppressHydrationWarning
       {...(isOpen ? { open: true } : {})}
       data-dropdown
       className="relative group"
