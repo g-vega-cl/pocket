@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import type { GitHubRepo } from '#/shared/api/client.js'
 import { useRepoDropdown } from '#/features/repo/hooks/useRepoDropdown.js'
 
@@ -33,40 +32,6 @@ export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdo
     dropdownRef,
   } = useRepoDropdown(initialRepos, githubToken)
 
-  const inputRef = useRef<HTMLInputElement>(null)
-  const listRef = useRef<HTMLDivElement>(null)
-  const openRef = useRef(open)
-  openRef.current = open
-  const filteredRef = useRef(filteredRepos)
-  filteredRef.current = filteredRepos
-  const onSelectRef = useRef(onSelect)
-  onSelectRef.current = onSelect
-
-  useEffect(() => {
-    const input = inputRef.current
-    if (!input) return
-    const handler = () => openRef.current()
-    input.addEventListener('click', handler)
-    return () => input.removeEventListener('click', handler)
-  }, [])
-
-  useEffect(() => {
-    const list = listRef.current
-    if (!list) return
-    const handler = (e: MouseEvent) => {
-      const btn = (e.target as HTMLElement).closest('[data-repo-index]') as HTMLElement | null
-      if (!btn) return
-      const idx = Number(btn.dataset.repoIndex)
-      const repo = filteredRef.current[idx]
-      if (repo) {
-        select(repo)
-        onSelectRef.current(repo)
-      }
-    }
-    list.addEventListener('click', handler)
-    return () => list.removeEventListener('click', handler)
-  }, [])
-
   function handleSelect(repo: GitHubRepo) {
     select(repo)
     onSelect(repo)
@@ -75,7 +40,6 @@ export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdo
   return (
     <div className="relative" ref={dropdownRef}>
       <input
-        ref={inputRef}
         type="text"
         value={search || (selectedRepo ? selectedRepo.fullName : '')}
         onChange={e => updateSearch(e.target.value)}
@@ -84,16 +48,15 @@ export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdo
         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none"
       />
       {isOpen && (
-        <div ref={listRef} className="absolute z-10 mt-1 w-full max-h-72 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
+        <div className="absolute z-10 mt-1 w-full max-h-72 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
           {isLoading && repos.length === 0 ? (
             <div className="px-3 py-2.5 text-sm text-gray-400 dark:text-gray-500">
               Loading your repos...
             </div>
           ) : filteredRepos.length > 0 ? (
-            filteredRepos.map((r, i) => (
+            filteredRepos.map(r => (
               <button
                 key={r.fullName}
-                data-repo-index={i}
                 type="button"
                 onClick={() => handleSelect(r)}
                 className="w-full text-left px-3 py-2.5 hover:bg-gray-50 dark:hover:bg-gray-700 border-b border-gray-100 dark:border-gray-700 last:border-b-0 transition-colors"
