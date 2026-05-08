@@ -25,10 +25,9 @@ import {
   initLocalRepo,
   isPodmanAvailable,
   killAllContainers,
-  stopSandboxContainer,
   ensureContainer,
 } from '@pocket/tools'
-import type { Event, PocketConfig, WatchdogConfig, Message, ToolContext } from '@pocket/core'
+import type { Event, PocketConfig, Message, ToolContext } from '@pocket/core'
 import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY, DEFAULT_WATCHDOG_CONFIG } from '@pocket/core'
 
 function getConfig(): PocketConfig {
@@ -117,10 +116,21 @@ export async function buildApp(options: BuildOptions) {
   })
 
   // List GitHub repos
+  const REPOS_CACHE_TTL = 24 * 60 * 60 * 1000
+  const reposCache = new Map<string, { data: unknown; expiry: number }>()
+
   app.get('/api/github/repos', async (request, reply) => {
-    const githubToken = options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN
+    const authHeader = request.headers.authorization
+    const githubToken = authHeader?.startsWith('Bearer ')
+      ? authHeader.slice(7)
+      : (options.env?.GITHUB_TOKEN ?? process.env.GITHUB_TOKEN)
     if (!githubToken) {
       return reply.status(400).send({ error: 'GITHUB_TOKEN not configured' })
+    }
+
+    if (!authHeader) {
+      const cached = reposCache.get(githubToken)
+      if (cached && Date.now() < cached.expiry) return cached.data
     }
 
     try {
@@ -146,7 +156,7 @@ export async function buildApp(options: BuildOptions) {
         language: string | null
       }>
 
-      return {
+      const data = {
         repos: repos.map(r => ({
           fullName: r.full_name,
           cloneUrl: r.clone_url,
@@ -156,6 +166,12 @@ export async function buildApp(options: BuildOptions) {
           language: r.language,
         })),
       }
+
+      if (!authHeader) {
+        reposCache.set(githubToken, { data, expiry: Date.now() + REPOS_CACHE_TTL })
+      }
+
+      return data
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       return reply.status(500).send({ error: `Failed to fetch repos: ${message}` })
@@ -838,7 +854,7 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
           return resolved
         },
       }
-      const gen = githubCreatePRTool.call({}, ctx)
+      const gen = githubCreatePRTool.call({ title: session.task, body: `Task: ${session.task}\nRepo: ${session.repoUrl}\nBranch: ${session.branchName ?? 'unknown'}` }, ctx)
       let result = await gen.next()
       while (!result.done) {
         result = await gen.next()

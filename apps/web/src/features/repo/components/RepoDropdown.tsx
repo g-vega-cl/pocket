@@ -14,37 +14,65 @@ function formatDate(dateStr: string): string {
 
 interface RepoDropdownProps {
   onSelect: (repo: GitHubRepo) => void
+  initialRepos?: GitHubRepo[]
+  githubToken?: string
 }
 
-export function RepoDropdown({ onSelect }: RepoDropdownProps) {
+export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdownProps) {
   const {
     search,
     updateSearch,
     select,
     isOpen,
     open,
+    close,
     filteredRepos,
-    dropdownRef,
-  } = useRepoDropdown()
+    repos,
+    isLoading,
+    selectedRepo,
+    detailsRef,
+  } = useRepoDropdown(initialRepos, githubToken)
 
   function handleSelect(repo: GitHubRepo) {
     select(repo)
     onSelect(repo)
   }
 
+  function handleToggle(e: React.SyntheticEvent<HTMLDetailsElement>) {
+    if (e.currentTarget.open) open()
+    else close()
+  }
+
   return (
-    <div className="relative" ref={dropdownRef}>
-      <input
-        type="text"
-        value={search}
-        onChange={e => updateSearch(e.target.value)}
-        onFocus={() => open()}
-        placeholder="Select a repo or paste a URL..."
-        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none"
-      />
-      {isOpen && filteredRepos.length > 0 && (
-        <div className="absolute z-10 mt-1 w-full max-h-72 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
-          {filteredRepos.map(r => (
+    <details
+      ref={detailsRef}
+      // React 19 unconditionally reads the native <details> open IDL attribute
+      // during hydration, even when we omit `open` from JSX. suppressHydrationWarning
+      // tells React the difference between native DOM state and SSR output is intentional
+      // progressive enhancement — the dropdown works natively before JS hydrates.
+      suppressHydrationWarning
+      {...(isOpen ? { open: true } : {})}
+      data-dropdown
+      className="relative group"
+      onToggle={handleToggle}
+    >
+      <summary className="list-none [&::-webkit-details-marker]:hidden block cursor-pointer">
+        <input
+          type="text"
+          value={search || (selectedRepo ? selectedRepo.fullName : '')}
+          onChange={e => updateSearch(e.target.value)}
+          onFocus={() => open()}
+          placeholder="Select a repo or paste a URL..."
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-[#4FB8B2] focus:border-transparent outline-none"
+        />
+      </summary>
+      <div className="absolute z-10 mt-1 w-full max-h-72 overflow-y-auto rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg">
+        {isLoading && repos.length === 0 ? (
+          <div className="px-3 py-2.5 text-sm text-gray-400 dark:text-gray-500">
+            Loading your repos...
+          </div>
+        ) : filteredRepos.length > 0 ? (
+          filteredRepos.map(r => (
             <button
               key={r.fullName}
               type="button"
@@ -75,14 +103,13 @@ export function RepoDropdown({ onSelect }: RepoDropdownProps) {
                 </div>
               </div>
             </button>
-          ))}
-        </div>
-      )}
-      {isOpen && filteredRepos.length === 0 && (
-        <div className="absolute z-10 mt-1 w-full rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 shadow-lg px-3 py-2 text-sm text-gray-500 dark:text-gray-400">
-          No repos match your search
-        </div>
-      )}
-    </div>
+          ))
+        ) : (
+          <div className="px-3 py-2.5 text-sm text-gray-400 dark:text-gray-500">
+            {repos.length > 0 ? 'No repos match your search' : 'No repos found'}
+          </div>
+        )}
+      </div>
+    </details>
   )
 }

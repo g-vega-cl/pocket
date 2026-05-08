@@ -3,21 +3,41 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '#/shared/api/client.js'
 import type { GitHubRepo } from '#/shared/api/client.js'
 
-const REPOS_QUERY_KEY = ['github', 'repos'] as const
+export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string) {
+  const hasInitialData = initialData && initialData.length > 0
 
-export function useRepoDropdown() {
   const { data, isLoading, error } = useQuery({
-    queryKey: REPOS_QUERY_KEY,
-    queryFn: api.fetchRepos,
+    queryKey: ['github', 'repos', githubToken],
+    queryFn: () => api.fetchRepos(githubToken),
     staleTime: 5 * 60 * 1000,
+    initialData: hasInitialData ? { repos: initialData } : undefined,
   })
 
   const [search, setSearch] = useState('')
   const [isOpen, setIsOpen] = useState(false)
-  const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
+  const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(
+    initialData?.length ? initialData[0] : null,
+  )
+  const detailsRef = useRef<HTMLDetailsElement>(null)
 
-  const repos = data?.repos ?? []
+  const repos = data?.repos ?? (initialData ?? [])
+
+  // Sync React state with native <details> DOM state after hydration
+  useEffect(() => {
+    const details = detailsRef.current
+    if (details && details.open !== isOpen) {
+      setIsOpen(details.open)
+    }
+  }, [])
+
+  const mounted = useRef(false)
+  useEffect(() => {
+    if (mounted.current) {
+      setSelectedRepo(null)
+      setSearch('')
+    }
+    mounted.current = true
+  }, [githubToken])
 
   const filteredRepos = useMemo(
     () =>
@@ -33,8 +53,8 @@ export function useRepoDropdown() {
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(e.target as Node)
+        detailsRef.current &&
+        !detailsRef.current.contains(e.target as Node)
       ) {
         setIsOpen(false)
       }
@@ -44,9 +64,7 @@ export function useRepoDropdown() {
   }, [])
 
   function open() {
-    if (repos.length > 0) {
-      setIsOpen(true)
-    }
+    setIsOpen(true)
   }
 
   function close() {
@@ -78,6 +96,6 @@ export function useRepoDropdown() {
     close,
     select,
     selectedRepo,
-    dropdownRef,
+    detailsRef,
   }
 }
