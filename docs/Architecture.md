@@ -800,15 +800,14 @@ TanStack Start does SSR by default. However, the chat route (`/sessions/:id`) us
 
 Other routes (homepage, about) remain SSR-enabled. Any component that depends on `EventSource` must be client-only — wrap with a "client only" boundary or render a skeleton during SSR.
 
-### Data fetching with TanStack Query
+### Data fetching with TanStack Start + TanStack Query
 
-The homepage uses `@tanstack/react-query` for server-state management:
+The homepage uses a hybrid SSR + client data fetching pattern:
 
-- **`useQuery` for reads** — `listSessions` and `fetchRepos` use `useQuery` with query keys `['sessions']` and `['github', 'repos']`. Results are cached, deduplicated, and refetched intelligently.
-- **`useMutation` for writes** — `createSession` is a mutation that invalidates the sessions cache and navigates on success.
-- **Error surfacing** — Both `useQuery` and `useMutation` expose `error` states that are rendered inline instead of silently swallowed.
-
-This replaces raw `useEffect` + `fetch` calls that were error-prone and harder to test. Custom hooks like `useRepoDropdown` (in `features/repo/`) encapsulate query logic + local UI state, keeping the component surface area small. The `api` client is in `shared/api/client.ts` — a single typed wrapper for all REST endpoints.
+- **SSR preload via server functions** — `listSessions` and `fetchRepos` run in the SSR loader via `Promise.all`. Session data hits the Fastify backend; repo data delegates to Fastify's `/api/github/repos` endpoint (which has access to `GITHUB_TOKEN`). Both datasets are serialized into the initial HTML — no client flash.
+- **`useQuery` for client fallback** — `useRepoDropdown` in `features/repo/` wraps `useQuery` with query key `['github', 'repos', githubToken]`. SSR data is passed as `initialData` (skipping refetch via `staleTime`). When no server token exists, the client query falls back to fetching through the Fastify backend.
+- **User-provided token support** — The query key includes the token. When the user types a GitHub token, the key changes, triggering a fresh fetch with the user's token sent as an `Authorization: Bearer` header. The backend checks the header first, falling back to `process.env.GITHUB_TOKEN`.
+- **Auto-selection** — The first repo from SSR data is pre-selected on initial render (via `useState` initializer), populating the form's `repoUrl` immediately.
 
 ---
 
