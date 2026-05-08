@@ -800,6 +800,101 @@ TanStack Start does SSR by default. However, the chat route (`/sessions/:id`) us
 
 Other routes (homepage, about) remain SSR-enabled. Any component that depends on `EventSource` must be client-only — wrap with a "client only" boundary or render a skeleton during SSR.
 
+### Progressive enhancement: zero hydration gap
+
+SSR paints perfect HTML before React attaches event handlers. In the milliseconds between paint and hydration, interactive elements are inert — clicks silently fail. This is inherent to the SSR + hydration model.
+
+Pocket uses **three layers of defense** to eliminate the gap:
+
+| Layer | Mechanism | When it kicks in | What it provides |
+|---|---|---|---|
+| Native HTML | `<details>/<summary>` as disclosure widget | Immediately (browser-native, zero JS) | Open/close without any JavaScript |
+| Inline script | Pre-hydration event listeners in `<head>` | Before React bundle downloads | `focusin` opens `<details>`, click-outside closes |
+| React takeover | Hydration with DOM state sync on mount | After bundle hydrates | Full interactivity (search, filter, select) |
+
+**Layer 1: Native HTML.** The `RepoDropdown` uses `<details open={isOpen}>` with a `<summary>` wrapping the trigger `<input>`. When the page first paints, clicking the summary area toggles the `<details>` natively — repos appear instantly, no JS required:
+
+```tsx
+// Before: custom div + conditional render
+<div ref={dropdownRef}>
+  <input onFocus={() => open()} />
+  {isOpen && <div>{...repos}</div>}
+</div>
+
+// After: native <details> with React controlling the open prop
+<details ref={detailsRef} open={isOpen} data-dropdown
+  suppressHydrationWarning>  {/* React 19 reads native open IDL attr — see below */}
+  <summary className="list-none [&::-webkit-details-marker]:hidden">
+    <input onFocus={() => open()} />
+  </summary>
+  <div>{...repos}</div>
+</details>
+```
+
+**`suppressHydrationWarning` is required** because React 19 unconditionally reads the native `<details>` element's `open` IDL attribute during hydration — even when your JSX omits the prop entirely. The server-rendered HTML has no `open` attribute, but React's internal hydration comparison surfaces the native DOM property. This is a known React 19 `<details>` quirk, not a bug in our code.
+
+**Layer 2: Inline pre-hydration script.** A tiny inline `<script>` in `__root.tsx`'s `<head>` (alongside `THEME_INIT_SCRIPT`):
+
+```js
+// HYDRATION_SAFE_INTERACTIONS — runs before any framework code
+(function(){
+  document.addEventListener('focusin', function(e){
+    var t=e.target;
+    if(!t||t.nodeType!==1)return;
+    if(t.tagName!=='INPUT'&&t.tagName!=='TEXTAREA')return;
+    var d=t.closest('details[data-dropdown]');
+    if(d)d.open=true;
+  });
+  document.addEventListener('click', function(e){
+    var n=document.querySelectorAll('details[data-dropdown][open]');
+    for(var i=0;i<n.length;i++){
+      if(!n[i].contains(e.target))n[i].open=false;
+    }
+  });
+})();
+```
+
+This is ~15 lines of ES5-safe JavaScript. It loads synchronously with the HTML — by the time the user can interact, it's already active.
+
+**Layer 3: React takeover.** On mount, React syncs its state with any DOM changes the user made pre-hydration:
+
+```ts
+// In useRepoDropdown.ts
+useEffect(() => {
+  const details = detailsRef.current
+  if (details && details.open !== isOpen) {
+    setIsOpen(details.open)
+  }
+}, [])
+```
+
+If the user clicked the dropdown open before hydration completed, React picks up that state instead of overriding it.
+
+**Selective hydration with Suspense.** React 19 hydrates Suspense boundaries independently. The homepage wraps the form in one `<Suspense>` boundary and the Recent Sessions list in another — the interactive form (containing the dropdown) hydrates first:
+
+```tsx
+<Suspense fallback={null}>
+  <form>{/* RepoDropdown, task, model inputs — hydrates first */}</form>
+</Suspense>
+<Suspense fallback={null}>
+  <RecentSessions />{/* Below-fold content — hydrates second */}
+</Suspense>
+```
+
+`fallback={null}` is safe here because the data is already in SSR HTML. The boundaries exist purely for hydration prioritization — the page never actually suspends.
+
+**Resource hints.** Preconnect to external origins the page depends on. Pocket adds preconnect links for Google Fonts in the root `head` config (`fonts.googleapis.com` + `fonts.gstatic.com` with `crossOrigin: 'anonymous'` for font file CORS). This saves ~50-150ms of DNS + TLS negotiation before the render-blocking font CSS resolves.
+
+**Implementing files:**
+
+| Pattern | File(s) |
+|---|---|
+| `<details>` progressive enhancement | `features/repo/components/RepoDropdown.tsx`, `features/repo/hooks/useRepoDropdown.ts` |
+| Pre-hydration inline script | `routes/__root.tsx` (`HYDRATION_SAFE_INTERACTIONS` constant) |
+| Selective hydration Suspense | `routes/index.tsx` |
+| Resource preconnect hints | `routes/__root.tsx` (`links` config in `head`) |
+| DOM state sync on mount | `features/repo/hooks/useRepoDropdown.ts` (lines 25-31) |
+
 ### Data fetching with TanStack Start + TanStack Query
 
 The homepage uses a hybrid SSR + client data fetching pattern:
