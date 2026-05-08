@@ -46,7 +46,7 @@ export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdo
   return (
     <details
       ref={detailsRef}
-      open={isOpen || undefined}
+      {...(isOpen ? { open: true } : {})}
       data-dropdown
       className="relative group"
       onToggle={handleToggle}
