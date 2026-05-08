@@ -65,15 +65,6 @@ describe('RepoDropdown', () => {
     expect(open).toHaveBeenCalled()
   })
 
-  it('calls open() on input click', () => {
-    const open = vi.fn()
-    setupHookReturn({ open })
-    render(<RepoDropdown onSelect={vi.fn()} />)
-    const input = screen.getByPlaceholderText('Select a repo or paste a URL...')
-    fireEvent.click(input)
-    expect(open).toHaveBeenCalled()
-  })
-
   it('renders repo items when dropdown is open', async () => {
     const repo1 = makeRepo({ fullName: 'acme/frontend', description: 'UI layer' })
     const repo2 = makeRepo({ fullName: 'acme/backend', description: 'API layer' })

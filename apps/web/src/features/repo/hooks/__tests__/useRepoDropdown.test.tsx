@@ -146,19 +146,16 @@ describe('useRepoDropdown', () => {
     expect(result.current.error).toBeInstanceOf(Error)
   })
 
-  it('opens dropdown when repos loaded, closes via close()', async () => {
+  it('starts open by default, closes via close()', async () => {
     vi.spyOn(api, 'fetchRepos').mockResolvedValue({ repos: mockRepos })
 
     const { result } = renderHook(() => useRepoDropdown(), {
       wrapper: createWrapper(),
     })
 
-    await waitFor(() => expect(result.current.repos).toHaveLength(3))
-
-    act(() => {
-      result.current.open()
-    })
     expect(result.current.isOpen).toBe(true)
+
+    await waitFor(() => expect(result.current.repos).toHaveLength(3))
 
     act(() => {
       result.current.close()
@@ -167,18 +164,15 @@ describe('useRepoDropdown', () => {
     expect(result.current.isOpen).toBe(false)
   })
 
-  it('allows opening dropdown even when repos list is empty', async () => {
+  it('starts open even when repos list is empty', async () => {
     vi.spyOn(api, 'fetchRepos').mockResolvedValue({ repos: [] })
 
     const { result } = renderHook(() => useRepoDropdown(), {
       wrapper: createWrapper(),
     })
 
-    await waitFor(() => expect(result.current.repos).toHaveLength(0))
-
-    act(() => {
-      result.current.open()
-    })
     expect(result.current.isOpen).toBe(true)
+
+    await waitFor(() => expect(result.current.repos).toHaveLength(0))
   })
 })

@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react'
 import type { GitHubRepo } from '#/shared/api/client.js'
 import { useRepoDropdown } from '#/features/repo/hooks/useRepoDropdown.js'
 
@@ -33,18 +32,6 @@ export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdo
     dropdownRef,
   } = useRepoDropdown(initialRepos, githubToken)
 
-  const inputRef = useRef<HTMLInputElement>(null)
-  const openRef = useRef(open)
-  openRef.current = open
-
-  useEffect(() => {
-    const el = inputRef.current
-    if (!el) return
-    const handler = () => openRef.current()
-    el.addEventListener('click', handler)
-    return () => el.removeEventListener('click', handler)
-  }, [])
-
   function handleSelect(repo: GitHubRepo) {
     select(repo)
     onSelect(repo)
@@ -53,7 +40,6 @@ export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdo
   return (
     <div className="relative" ref={dropdownRef}>
       <input
-        ref={inputRef}
         type="text"
         value={search || (selectedRepo ? selectedRepo.fullName : '')}
         onChange={e => updateSearch(e.target.value)}

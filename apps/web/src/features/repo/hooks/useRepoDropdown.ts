@@ -14,7 +14,7 @@ export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string
   })
 
   const [search, setSearch] = useState('')
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(true)
   const [selectedRepo, setSelectedRepo] = useState<GitHubRepo | null>(
     initialData?.length ? initialData[0] : null,
   )
