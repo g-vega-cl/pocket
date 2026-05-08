@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '#/shared/api/client.js'
 import type { GitHubRepo } from '#/shared/api/client.js'
 
-export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string, onSelectRepo?: (repo: GitHubRepo) => void) {
+export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string) {
   const hasInitialData = initialData && initialData.length > 0
 
   const { data, isLoading, error } = useQuery({
@@ -22,26 +22,13 @@ export function useRepoDropdown(initialData?: GitHubRepo[], githubToken?: string
 
   const repos = data?.repos ?? (initialData ?? [])
 
-  const autoSelectedRef = useRef(false)
-
+  const mounted = useRef(false)
   useEffect(() => {
-    if (repos.length > 0 && !selectedRepo && !autoSelectedRef.current) {
-      autoSelectedRef.current = true
-      const first = repos[0]
-      setSelectedRepo(first)
-      onSelectRepo?.(first)
-    }
-  }, [repos, selectedRepo])
-
-  const prevTokenRef = useRef(githubToken)
-
-  useEffect(() => {
-    if (prevTokenRef.current !== githubToken) {
-      prevTokenRef.current = githubToken
+    if (mounted.current) {
       setSelectedRepo(null)
       setSearch('')
-      autoSelectedRef.current = false
     }
+    mounted.current = true
   }, [githubToken])
 
   const filteredRepos = useMemo(

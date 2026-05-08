@@ -30,7 +30,7 @@ export function RepoDropdown({ onSelect, initialRepos, githubToken }: RepoDropdo
     isLoading,
     selectedRepo,
     dropdownRef,
-  } = useRepoDropdown(initialRepos, githubToken, onSelect)
+  } = useRepoDropdown(initialRepos, githubToken)
 
   function handleSelect(repo: GitHubRepo) {
     select(repo)
