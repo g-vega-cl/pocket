@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 config({ path: path.resolve(__dirname, '..', '..', '..', '.env') })
 
-import { SessionManager, EventLog, ToolRegistry, AgentRunner, ProcessManager, PermissionGate, buildConversationFromEvents } from '@pocket/agent'
+import { SessionManager, EventLog, ToolRegistry, AgentRunner, ProcessManager, PermissionGate, buildConversationFromEvents, LearningDB, buildSystemPrompt, runLearningPipeline } from '@pocket/agent'
 import { OpenRouterProvider } from '@pocket/llm'
 import {
   readFileTool, listFilesTool, writeFileTool, editFileTool,
@@ -20,6 +20,7 @@ import {
   githubCreatePRTool,
   bootstrapRepoTool,
   createBackgroundTools,
+  createSaveSkillTool,
   getWorkspaceDir,
   cloneRepo,
   initLocalRepo,
@@ -61,6 +62,31 @@ function getConfig(): PocketConfig {
   }
 }
 
+function buildBootstrapInfo(result: any): string {
+  const { detected, scripts, configFiles, ports, install, warnings } = result
+  const detectedStr = detected.projectType !== 'unknown'
+    ? `Project Type: ${detected.projectType} (${detected.packageManager || 'unknown package manager'})`
+    : 'Project Type: unknown'
+  const scriptsList = Object.keys(scripts).length > 0
+    ? `Available Scripts: ${Object.entries(scripts).map(([k, v]) => `${k}="${v}"`).join(', ')}`
+    : 'Scripts: none detected'
+  const configList = Object.entries(configFiles).filter(([_, v]) => v).map(([k]) => k.replace('has', '')).join(', ')
+  const configStr = configList ? `Detected Config: ${configList}` : ''
+  const portsStr = `Dev Server Port: ${ports.dev} (suggested: ${ports.suggested.join(', ')})`
+  const installStr = install.success ? 'Dependencies: installed successfully' : `Dependencies: install failed (${install.output.slice(0, 100)}...)`
+  const warnStr = warnings.length > 0 ? `Warnings: ${warnings.join('; ')}` : ''
+
+  return `
+${detectedStr}
+${scriptsList}
+${configStr}
+${portsStr}
+${installStr}
+${warnStr}
+
+NOTE: Use the exact scripts listed above for THIS repository. Commands vary by project - do not assume standard commands like "npm install" work everywhere. Use what was detected.`
+}
+
 interface BuildOptions {
   sessionsDir: string
   env?: Record<string, string | undefined>
@@ -72,6 +98,7 @@ export async function buildApp(options: BuildOptions) {
   await app.register(cors, { origin: true })
 
   const eventLog = new EventLog(options.sessionsDir)
+  const pocketHome = options.sessionsDir.replace(/\/sessions$/, '')
   const config = getConfig()
   const permissionGate = new PermissionGate({
     bashAllow: config.bashAllow,
@@ -79,6 +106,7 @@ export async function buildApp(options: BuildOptions) {
     protectedBranches: config.protectedBranches,
   })
   const sessionManager = new SessionManager(options.sessionsDir, eventLog, permissionGate)
+  const learningDB = new LearningDB(pocketHome)
 
   // Event emitters per session for SSE
   const eventEmitters = new Map<string, Set<(event: Event) => void>>()
@@ -391,41 +419,17 @@ export async function buildApp(options: BuildOptions) {
       bgTools.listProcessesTool as any,
     ])
 
-    // Build system prompt
-    let bootstrapInfo = ''
-    if (bootstrapResult) {
-      const { detected, scripts, configFiles, ports, install, warnings } = bootstrapResult
-      const detectedStr = detected.projectType !== 'unknown'
-        ? `Project Type: ${detected.projectType} (${detected.packageManager || 'unknown package manager'})`
-        : 'Project Type: unknown'
-      const scriptsList = Object.keys(scripts).length > 0
-        ? `Available Scripts: ${Object.entries(scripts).map(([k, v]) => `${k}="${v}"`).join(', ')}`
-        : 'Scripts: none detected'
-      const configList = Object.entries(configFiles).filter(([_, v]) => v).map(([k]) => k.replace('has', '')).join(', ')
-      const configStr = configList ? `Detected Config: ${configList}` : ''
-      const portsStr = `Dev Server Port: ${ports.dev} (suggested: ${ports.suggested.join(', ')})`
-      const installStr = install.success ? 'Dependencies: installed successfully' : `Dependencies: install failed (${install.output.slice(0, 100)}...)`
-      const warnStr = warnings.length > 0 ? `Warnings: ${warnings.join('; ')}` : ''
+    // Register save_skill tool (learning system)
+    const saveSkillTool = createSaveSkillTool(() => learningDB)
+    registry.register(saveSkillTool as any)
 
-      bootstrapInfo = `
-${detectedStr}
-${scriptsList}
-${configStr}
-${portsStr}
-${installStr}
-${warnStr}
-
-NOTE: Use the exact scripts listed above for THIS repository. Commands vary by project - do not assume standard commands like "npm install" work everywhere. Use what was detected.`
-    }
-
-    const systemPrompt = `You are Pocket, an autonomous coding agent.
-
-Repository: ${updatedSession.task}
-Branch: ${updatedSession.branchName ?? 'N/A'}${bootstrapInfo}
-
-Use tools to explore and make changes as needed.
-
-IMPORTANT: When you finish making changes, always use the git_commit tool to save them with a clear message, then use git_push to push your branch to origin. Do not just say you will commit or push — actually call the tools.`
+    // Build system prompt with injected memory, skills, and quality guidelines
+    const bootstrapInfo = bootstrapResult ? buildBootstrapInfo(bootstrapResult) : ''
+    const systemPrompt = buildSystemPrompt({
+      task: updatedSession.task,
+      branchName: updatedSession.branchName,
+      bootstrapInfo,
+    }, learningDB)
 
     const runner = new AgentRunner({
       sessionId: id,
@@ -453,11 +457,34 @@ IMPORTANT: When you finish making changes, always use the git_commit tool to sav
 
     // Run the turn asynchronously
     runner.runTurn({ role: 'user', content }).then(() => {
+      const status = runner.isAborted ? 'done' : 'idle'
       const updated = sessionManager.updateSession(id, {
         nextSeq: runner.getSeq(),
-        status: runner.isAborted ? 'done' : 'idle',
+        status,
       })
       console.log(`[Pocket] Messages: turn resolved for session ${id} (status=${updated?.status}, aborted=${runner.isAborted})`)
+
+      // Trigger learning pipeline if session is done and has a rating
+      if (status === 'done') {
+        const rating = learningDB.getRating(id, 'default')
+        if (rating) {
+          const apiKey = options.env?.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY
+          if (apiKey) {
+            const pipelineProvider = new OpenRouterProvider({ apiKey })
+            runLearningPipeline(
+              { sessionId: id, userId: 'default', stars: rating.stars, categories: rating.categories, comment: rating.comment ?? undefined },
+              eventLog,
+              learningDB,
+              pipelineProvider,
+              updated?.model ?? 'deepseek/deepseek-chat',
+            ).then(result => {
+              console.log(`[Pocket] Learning: pipeline complete for session ${id} (${result.memoryCount} memories, ${result.skillCount} skills)`)
+            }).catch(err => {
+              console.error(`[Pocket] Learning: pipeline error for session ${id}: ${err instanceof Error ? err.message : String(err)}`)
+            })
+          }
+        }
+      }
     }).catch((error) => {
       const message = error instanceof Error ? error.message : String(error)
       console.error(`[Pocket] Messages: turn error for session ${id}: ${message}`)
@@ -756,6 +783,60 @@ Be concise and direct. Focus on making the prompt more specific, actionable, and
       }
       return reply.status(500).send({ error: message })
     }
+  })
+
+  // Rate a session — saves rating and triggers learning pipeline if session is done
+  app.post('/api/sessions/:id/rate', async (request, reply) => {
+    const { id } = request.params as { id: string }
+    const { stars, categories, comment } = request.body as {
+      stars: number
+      categories?: string[]
+      comment?: string
+    }
+
+    const session = sessionManager.getSession(id)
+    if (!session) {
+      return reply.status(404).send({ error: 'Session not found' })
+    }
+
+    if (!stars || stars < 1 || stars > 5) {
+      return reply.status(400).send({ error: 'stars must be 1-5' })
+    }
+
+    const cat = categories ?? []
+
+    // Save rating to database
+    learningDB.saveRating({
+      sessionId: id,
+      userId: 'default',
+      stars,
+      categories: cat,
+      comment,
+      createdAt: Date.now(),
+    })
+
+    console.log(`[Pocket] Rate: session ${id} rated ${stars}/5${cat.length > 0 ? ` (${cat.join(', ')})` : ''}`)
+
+    // If session is already done, trigger pipeline immediately
+    if (session.status === 'done' || session.status === 'idle' || session.status === 'error' || session.status === 'interrupted') {
+      const apiKey = options.env?.OPENROUTER_API_KEY ?? process.env.OPENROUTER_API_KEY
+      if (apiKey) {
+        const pipelineProvider = new OpenRouterProvider({ apiKey })
+        runLearningPipeline(
+          { sessionId: id, userId: 'default', stars, categories: cat, comment },
+          eventLog,
+          learningDB,
+          pipelineProvider,
+          session.model,
+        ).then(result => {
+          console.log(`[Pocket] Rate: pipeline complete for session ${id} (${result.memoryCount} memories, ${result.skillCount} skills)`)
+        }).catch(err => {
+          console.error(`[Pocket] Rate: pipeline error for session ${id}: ${err instanceof Error ? err.message : String(err)}`)
+        })
+      }
+    }
+
+    return { ok: true }
   })
 
   // Abort agent

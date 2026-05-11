@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { z } from 'zod'
-import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY } from '../index.js'
+import { DEFAULT_PROTECTED_BRANCHES, DEFAULT_SANDBOX_IMAGE, DEFAULT_BASH_DENY, RATING_CATEGORIES } from '../index.js'
 import type {
   Event,
   EventType,
@@ -16,6 +16,11 @@ import type {
   ChatRequest,
   ChatUsage,
   BackgroundProcess,
+  SessionRating,
+  MemoryEntry,
+  SkillEntry,
+  SkillScope,
+  SkillType,
 } from '../index.js'
 
 describe('core types', () => {
@@ -162,5 +167,79 @@ describe('core types', () => {
       }
       expect(meta.status).toBe(s)
     }
+  })
+})
+
+// ─── Learning types (§v1.5) ───────────────────────────
+
+describe('learning types', () => {
+  it('should allow constructing a SessionRating', () => {
+    const rating: SessionRating = {
+      sessionId: 'sess-1',
+      userId: 'default',
+      stars: 4,
+      categories: ['task_completion', 'code_quality'],
+      comment: 'Great work',
+      createdAt: Date.now(),
+    }
+    expect(rating.stars).toBe(4)
+    expect(rating.categories).toHaveLength(2)
+  })
+
+  it('should allow constructing a MemoryEntry', () => {
+    const entry: MemoryEntry = {
+      id: 1,
+      userId: 'default',
+      content: 'User prefers concise git messages',
+      category: 'user_preference',
+      createdAt: Date.now(),
+    }
+    expect(entry.category).toBe('user_preference')
+    expect(entry.userId).toBe('default')
+  })
+
+  it('should allow constructing a SkillEntry', () => {
+    const entry: SkillEntry = {
+      id: 1,
+      name: 'nodejs-debugging',
+      content: '# Debugging guide',
+      scope: 'shared' as SkillScope,
+      type: 'technical_pattern' as SkillType,
+      tags: ['nodejs'],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    expect(entry.name).toBe('nodejs-debugging')
+    expect(entry.scope).toBe('shared')
+    expect(entry.tags).toEqual(['nodejs'])
+  })
+
+  it('should have all rating categories defined', () => {
+    expect(RATING_CATEGORIES).toHaveLength(4)
+    const ids = RATING_CATEGORIES.map(c => c.id)
+    expect(ids).toContain('task_completion')
+    expect(ids).toContain('code_quality')
+    expect(ids).toContain('communication')
+    expect(ids).toContain('speed')
+    for (const cat of RATING_CATEGORIES) {
+      expect(cat.label).toBeTruthy()
+      expect(typeof cat.label).toBe('string')
+    }
+  })
+
+  it('should allow user-scoped skills with userId', () => {
+    const entry: SkillEntry = {
+      id: 2,
+      name: 'my-prefs',
+      content: 'Personal preferences',
+      scope: 'user' as SkillScope,
+      type: 'user_preference' as SkillType,
+      tags: [],
+      userId: 'default',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    expect(entry.scope).toBe('user')
+    expect(entry.userId).toBe('default')
   })
 })

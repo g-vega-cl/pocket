@@ -129,4 +129,11 @@ export const api = {
       body: JSON.stringify(input),
     })
   },
+
+  rateSession(id: string, stars: number, categories?: string[], comment?: string): Promise<{ ok: boolean }> {
+    return request(`/sessions/${id}/rate`, {
+      method: 'POST',
+      body: JSON.stringify({ stars, categories, comment }),
+    })
+  },
 }

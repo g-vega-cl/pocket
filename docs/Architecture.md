@@ -64,6 +64,13 @@ These are not platitudes — every decision in this doc traces back to one of th
 │                          │  fs · git · bash · web │           │
 │                          │  · plan · todos · gh   │           │
 │                          └────────────────────────┘           │
+│                                      │                        │
+│                                      ▼                        │
+│                           ┌────────────────────────┐           │
+│                           │  LearningDB            │           │
+│                           │  (SQLite: ratings,     │           │
+│                           │   memory, skills)      │           │
+│                           └────────────────────────┘           │
 └──────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -916,7 +923,8 @@ The homepage uses a hybrid SSR + client data fetching pattern:
 | Session metadata | `~/.pocket/sessions/{id}/meta.json` | JSON | on status change, debounced |
 | Permissions | `~/.pocket/sessions/{id}/permissions.json` | JSON | on rule change |
 | Workspace | `~/.pocket/workspaces/{id}/` | git checkout | continuously by tools |
-| User config | `~/.pocket/config.json` | JSON | on settings change |
+|| User config | `~/.pocket/config.json` | JSON | on settings change |
+|| Learning data | `~/.pocket/learning.db` | SQLite | on rating, pipeline completion |
 
 ### The append-and-fsync invariant
 
@@ -983,7 +991,8 @@ pocket/
 ├── packages/
 │   ├── core/              ← shared types: Event, Tool, Message, Session (zod)
 │   ├── agent/             ← AgentRunner, SessionManager, EventLog, PermissionGate,
-│   │                         ProcessManager, TokenCounter, RingBuffer
+│   │                         ProcessManager, TokenCounter, RingBuffer,
+│   │                         LearningDB, LearningPipeline, SystemPromptBuilder
 │   ├── tools/             ← 20 tool implementations (one file per tool or group)
 │   └── llm/               ← OpenRouterProvider, stream normalization
 └── docs/
@@ -1005,6 +1014,8 @@ These have a designed-in seam but no implementation:
 - **Hooks** (no pre/post-tool hook fires; if you need them, the executor has clear injection points)
 - **Voice / push notifications** (the event log makes both straightforward to add)
 - **Multi-user** (single-user assumption is baked into auth and storage; don't accidentally couple it deeper)
+- **Global learning across users** (per-user learning via ratings is in v1.5 — see §20)
+- **Cron / scheduled tasks** (learning is triggered by session completion, not a scheduler)
 
 ---
 
@@ -1054,6 +1065,14 @@ Each milestone was independently shippable and testable.
 - Session-scoped cleanup on delete, server shutdown via `killAllContainers()`
 - Error events emitted to session on container failure (no silent fallback)
 
+**M7.5 — Self-improving learning (v1.5)** ✓
+- Session rating UI (1-5 stars, categories, optional comment)
+- SQLite learning database (`node:sqlite`, zero deps)
+- `save_skill` tool — agent persists patterns during sessions
+- Post-session pipeline — LLM analyzes rated transcripts, extracts lessons
+- System prompt injection — memory + skills + quality guidelines in every new session
+- See §20
+
 ---
 
 ## 17. URL persistence (carried over from your old design)
@@ -1082,7 +1101,9 @@ Resolved during implementation:
 
 8. **Auto-bootstrap on clone** — after workspace is ready (cloned + sandbox started), `bootstrap_repo` tool automatically runs. It detects project type (node/python/rust/go), package manager (npm/pnpm/yarn/pip/cargo), scripts from package.json, config files (Vite, React, Next.js, Express, FastAPI, Django), and suggested dev server ports. It runs dependency install in the sandbox. Results are included in the agent's system prompt so the agent knows the exact commands for this repo instead of guessing.
 
-9. **Prompt improver** — an interactive prompt refinement tool accessible via the **✨ Improve** button in the chat composer. Opens a full-page view with a mini-chat to a separate LLM call (same session model) that has access to the full session conversation history AND 9 read-only tools (`read_file`, `list_files`, `glob`, `grep`, `web_fetch`, `web_search`, `git_status`, `git_log`, `git_diff`) to explore the codebase. The improver runs a server-side tool loop (up to 5 iterations) — tool execution is invisible to the client. When the user clicks **Apply**, the final prompt replaces the textarea. Key design: the improver's API (`POST /api/sessions/:id/improve`) never touches `events.jsonl`, never emits SSE events, and never goes through `AgentRunner`. The conversation state lives in the React component. Only the final accepted prompt enters the main chat. See §19.
+10. **Prompt improver** — an interactive prompt refinement tool accessible via the **✨ Improve** button in the chat composer...
+
+11. **Learning system** — session ratings (1-5 stars + structured categories + optional comment) trigger a post-session LLM analysis pipeline that extracts memory entries and skills. Results are stored in `~/.pocket/learning.db` (SQLite via `node:sqlite`, zero npm deps). Future sessions inject learned knowledge into the system prompt via `buildSystemPrompt()`. The agent can also save skills mid-session via the `save_skill` tool. See §20.
 
 Still open:
 - **Web push** — deferred to v1.5 per §6.
@@ -1208,3 +1229,122 @@ Layout:
 - **Input bar** (`flex-shrink-0`): text input + Send button for replies
 - **Action bar** (`flex-shrink-0`): Cancel (returns to chat, preserves draft) + **Apply Improved Prompt** (finalizes and fills textarea, then transitions back)
 - **"✨ Improve" button** in the main composer row (visible when textarea is non-empty and agent is idle)
+
+---
+
+## 20. Learning system (v1.5)
+
+Pocket improves over time by learning from session ratings. Users rate sessions 1-5 stars with optional structured feedback. A post-session pipeline analyzes the transcript, extracts lessons, and injects them into future system prompts.
+
+### The self-improvement loop
+
+```
+Session ends → user rates session (1-5 ★ + categories + optional comment)
+                        │
+              POST /api/sessions/:id/rate
+                        │
+              LearningDB.saveRating()
+                        │
+              runLearningPipeline() [async]
+                        │
+              Loads session transcript → calls LLM → extracts:
+                        │
+         ┌──────────────┼──────────────┐
+         ▼              ▼              ▼
+   memory.json    skills (shared)  skills (user)
+   (user prefs)   (tech patterns)  (personal habits)
+         │              │              │
+         └──────────────┴──────────────┘
+                        │
+              Injected into future system prompts
+```
+
+### Rating UX
+
+Mobile-first rating card appears at the bottom of the chat when the session is idle or done:
+
+```
+1-5 star selector
+Checkboxes: Task Completion, Code Quality, Communication, Speed
+Optional free-text comment
+[Skip] [Submit]
+```
+
+### Storage: SQLite via `node:sqlite`
+
+`~/.pocket/learning.db` — single file, zero npm dependencies (Node 22 stdlib):
+
+```sql
+ratings (session_id, user_id, stars, categories, comment, created_at)
+memory  (user_id, content, category, created_at)
+skills  (name, content, scope, type, tags, user_id, created_at, updated_at)
+```
+
+### Scope model
+
+| Storage | Scope | Examples |
+|---|---|---|
+| `memory` table | Per-user | "Prefers concise commit messages", "Uses pnpm" |
+| `skills` (scope: `shared`) | Install-wide | "Node.js timeout debugging", "Monorepo workflows" |
+| `skills` (scope: `user`) | Per-user | "Likes plans before code changes" |
+
+### Post-session pipeline
+
+1. Session transcript loaded from `events.jsonl` via `buildConversationFromEvents()`
+2. Existing skills and memory loaded (to avoid duplication)
+3. Analysis prompt sent to LLM (separate call, non-streaming, same provider):
+   - Input: transcript + rating stars + categories + comment + existing knowledge
+   - Output: JSON with `{ memoryUpdates, skillUpdates }`
+4. Results written to `learning.db`
+
+The pipeline runs asynchronously after session completion and rating submission — it never blocks the user.
+
+### System prompt injection
+
+Every new session's system prompt includes (in order):
+
+```
+=== ABOUT THIS USER ===        ← from memory table
+=== LEARNED SKILLS ===          ← from skills table (shared + user)
+=== SESSION GUIDELINES ===      ← skills with type=session_quality
+<repo context and bootstrap>
+```
+
+### `save_skill` tool
+
+The agent can also save skills during a session (not just post-session):
+
+```ts
+Tool: save_skill
+Input: { name, content, type, scope, tags }
+Permission: allow
+```
+
+This lets the agent persist patterns it discovers mid-task, not just patterns extracted after rating.
+
+### Files
+
+| File | Role |
+|---|---|
+| `packages/core/src/learning.ts` | Types: SessionRating, MemoryEntry, SkillEntry, RatingCategory |
+| `packages/agent/src/learning-db.ts` | SQLite CRUD for ratings, memory, and skills |
+| `packages/agent/src/system-prompt.ts` | Unified prompt builder with memory + skill injection |
+| `packages/agent/src/learning-pipeline.ts` | Post-session LLM analysis and extraction |
+| `packages/tools/src/save-skill.ts` | Agent-facing save_skill tool |
+| `apps/server/src/index.ts` | POST /api/sessions/:id/rate, LearningDB init, pipeline trigger |
+| `apps/web/.../RatingCard.tsx` | Star rating + categories + comment UI |
+
+### Configuration
+
+```json
+// Learning data lives in ~/.pocket/learning.db
+// No config needed — auto-created on first server start
+```
+
+### What's NOT in v1.5
+
+- **No global learning across users** — skills scoped `shared` apply to all users on the same install, but there's no aggregation across Pocket installs
+- **No curator** — stale skills are not auto-archived (manual deletion via API or DB)
+- **No embedding/semantic search** — skills are injected directly into the prompt, no retrieval step
+- **No mid-session auto-save triggers** — skills are saved by the agent calling `save_skill` or by the post-session pipeline
+- **No context compaction** — sessions stop at the token limit (by design)

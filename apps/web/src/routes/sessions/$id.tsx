@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { usePocketSession } from '#/features/session/hooks/usePocketSession.js'
 import { ThinkingDrawer } from '#/features/session/components/ThinkingDrawer.js'
 import { ImproverView } from '#/features/session/components/ImproverView.js'
+import { RatingCard } from '#/features/session/components/RatingCard.js'
 import type { PendingPermission } from '#/features/session/state/events.js'
 import { SessionInfoContext } from '#/features/session/state/session-context.js'
 
@@ -273,6 +274,12 @@ function SessionChatView() {
                 {error}
               </div>
             )}
+
+            {/* Rating card — shown when session is idle/done and there are messages */}
+            <RatingCard
+              sessionId={id}
+              visible={messages.length > 0 && !isThinking && (status === 'idle' || status === 'done' || status === 'error' || status === 'interrupted')}
+            />
           </div>
         </div>
 

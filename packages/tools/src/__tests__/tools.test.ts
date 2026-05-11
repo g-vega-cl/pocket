@@ -19,15 +19,27 @@ import {
   webFetchTool,
   webSearchTool,
   bootstrapRepoTool,
+  createSaveSkillTool,
 } from '../index.js'
+import { LearningDB } from '@pocket/agent'
 
 describe('Tool interface compliance', () => {
+  // Create a temp LearningDB for the save_skill tool
+  const tmpDir = import.meta.url.includes('test') ? undefined : undefined
+  // Use a lazy factory pattern — the DB won't be used in interface checks
+  const saveSkillTool = createSaveSkillTool(() => {
+    // This is a test stub — the DB is never actually called during interface checks
+    const stub = {} as LearningDB
+    return stub
+  })
+
   const tools = [
     readFileTool, listFilesTool, writeFileTool, editFileTool,
     bashTool, grepTool, globTool,
     gitStatusTool, gitLogTool, gitDiffTool,
     planTool, todosWriteTool, webFetchTool, webSearchTool,
     bootstrapRepoTool,
+    saveSkillTool as any,
   ]
 
   for (const tool of tools) {
