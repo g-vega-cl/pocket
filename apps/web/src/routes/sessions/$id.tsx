@@ -155,6 +155,10 @@ function SessionChatView() {
         onApply={(improved) => {
           setInput(improved)
           clearImproverStorage()
+          // Save improved prompt to localStorage AFTER clearing, so the
+          // useState initializer (reads localStorage on mount) finds it
+          // on page refresh instead of defaulting to empty string.
+          localStorage.setItem(`${storagePrefix}:draft`, improved)
           setShowImprover(false)
         }}
         onBack={() => {
