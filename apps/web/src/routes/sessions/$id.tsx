@@ -154,6 +154,7 @@ function SessionChatView() {
         draft={input}
         onApply={(improved) => {
           setInput(improved)
+          localStorage.setItem(`${storagePrefix}:draft`, improved)
           clearImproverStorage()
           setShowImprover(false)
         }}
