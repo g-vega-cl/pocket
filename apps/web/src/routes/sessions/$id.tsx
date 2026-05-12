@@ -138,8 +138,12 @@ function SessionChatView() {
   async function handleSend(e: React.FormEvent) {
     e.preventDefault()
     if (!input.trim()) return
+    const message = input.trim()
     setInput('')
-    await sendMessage(input.trim())
+    // Clear any previously improved draft from localStorage — once
+    // the message is sent, the prompt is no longer needed.
+    localStorage.removeItem(`${storagePrefix}:draft`)
+    await sendMessage(message)
   }
 
   function clearImproverStorage() {
@@ -156,9 +160,10 @@ function SessionChatView() {
         onApply={(improved) => {
           setInput(improved)
           clearImproverStorage()
-          // The improved prompt lives only in React state (setInput above).
-          // We do NOT re-save it to localStorage, so it won't persist
-          // across page reloads or navigation.
+          // Save improved prompt to localStorage so it survives page
+          // reload or navigation before the user presses Send. Once
+          // the message is sent, handleSend clears this key.
+          localStorage.setItem(`${storagePrefix}:draft`, improved)
           setShowImprover(false)
         }}
         onBack={() => {

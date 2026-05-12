@@ -85,7 +85,7 @@ describe('SessionChatView — localStorage persistence on Apply', () => {
     mockUseParams.mockReturnValue({ id: SESSION_ID })
   })
 
-  it('clears improver storage on apply and does not re-save improved prompt', async () => {
+  it('saves improved prompt to localStorage on apply (survives navigation before send)', async () => {
     const SessionChatView = await getSessionChatView()
 
     // Set up localStorage so ImproverView is shown with a draft
@@ -106,22 +106,50 @@ describe('SessionChatView — localStorage persistence on Apply', () => {
     // Click Apply
     fireEvent.click(screen.getByTestId('apply-improved'))
 
-    // The improved prompt should NOT be re-saved to localStorage —
-    // it lives only in React state. All improver keys are cleared.
-    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
+    // The improved prompt should be saved to localStorage so it survives
+    // page reload or navigation before the user presses Send
+    expect(localStorage.getItem(DRAFT_KEY)).toBe('improved prompt text')
+
+    // clearImproverStorage removes active and conversation keys
     expect(localStorage.getItem(ACTIVE_KEY)).toBeNull()
     expect(localStorage.getItem(CONVERSATION_KEY)).toBeNull()
   })
 
-  it('does not persist improved prompt after page refresh', async () => {
+  it('persists improved prompt so it survives page refresh (before send)', async () => {
     const SessionChatView = await getSessionChatView()
 
-    // Simulate a fresh page load — no draft in localStorage
+    // Simulate what localStorage looks like after Apply ran
+    localStorage.setItem(DRAFT_KEY, 'improved prompt text')
+
+    // Active flag is false/gone, so the main chat view renders
     render(<SessionChatView />)
 
-    // The textarea should be empty since the improved prompt was not saved
+    // The textarea should be pre-filled with the improved prompt from localStorage
     const textarea = screen.getByPlaceholderText('Send a message...')
-    expect(textarea).toHaveValue('')
+    expect(textarea).toHaveValue('improved prompt text')
+  })
+
+  it('clears improved draft from localStorage on send', async () => {
+    const SessionChatView = await getSessionChatView()
+    const mockSendMessage = vi.mocked(
+      (await import('#/features/session/hooks/usePocketSession.js')).usePocketSession().sendMessage
+    )
+
+    // Simulate that user had applied an improvement (draft saved in localStorage)
+    localStorage.setItem(DRAFT_KEY, 'improved prompt text')
+
+    render(<SessionChatView />)
+
+    // Type in the textarea to set React state (mimicking the improved prompt loaded from localStorage)
+    const textarea = screen.getByPlaceholderText('Send a message...')
+    expect(textarea).toHaveValue('improved prompt text')
+
+    // Click Send
+    const sendButton = screen.getByText('Send')
+    fireEvent.click(sendButton)
+
+    // The draft should be cleared from localStorage after send
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
   })
 
   it('clears all improver storage on back', async () => {
