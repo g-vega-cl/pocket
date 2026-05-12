@@ -85,7 +85,7 @@ describe('SessionChatView — localStorage persistence on Apply', () => {
     mockUseParams.mockReturnValue({ id: SESSION_ID })
   })
 
-  it('saves improved prompt to localStorage before clearing improver storage', async () => {
+  it('clears improver storage on apply and does not re-save improved prompt', async () => {
     const SessionChatView = await getSessionChatView()
 
     // Set up localStorage so ImproverView is shown with a draft
@@ -106,26 +106,22 @@ describe('SessionChatView — localStorage persistence on Apply', () => {
     // Click Apply
     fireEvent.click(screen.getByTestId('apply-improved'))
 
-    // The improved prompt should be saved to localStorage BEFORE clearImproverStorage runs
-    expect(localStorage.getItem(DRAFT_KEY)).toBe('improved prompt text')
-
-    // clearImproverStorage removes active and conversation keys
+    // The improved prompt should NOT be re-saved to localStorage —
+    // it lives only in React state. All improver keys are cleared.
+    expect(localStorage.getItem(DRAFT_KEY)).toBeNull()
     expect(localStorage.getItem(ACTIVE_KEY)).toBeNull()
     expect(localStorage.getItem(CONVERSATION_KEY)).toBeNull()
   })
 
-  it('persists improved prompt so it survives page refresh', async () => {
+  it('does not persist improved prompt after page refresh', async () => {
     const SessionChatView = await getSessionChatView()
 
-    // Simulate what localStorage looks like after Apply ran (with the fix)
-    localStorage.setItem(DRAFT_KEY, 'improved prompt text')
-
-    // Active flag is false/gone, so the main chat view renders
+    // Simulate a fresh page load — no draft in localStorage
     render(<SessionChatView />)
 
-    // The textarea should be pre-filled with the improved prompt from localStorage
+    // The textarea should be empty since the improved prompt was not saved
     const textarea = screen.getByPlaceholderText('Send a message...')
-    expect(textarea).toHaveValue('improved prompt text')
+    expect(textarea).toHaveValue('')
   })
 
   it('clears all improver storage on back', async () => {
