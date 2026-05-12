@@ -61,6 +61,37 @@ describe('Server API', () => {
     expect(body.sessions).toHaveLength(2)
   })
 
+  it('should limit listing to 20 newest sessions', async () => {
+    // Create 25 sessions with delay so timestamps differ
+    for (let i = 0; i < 25; i++) {
+      await app.inject({
+        method: 'POST',
+        url: '/api/sessions',
+        payload: { repoUrl: 'https://github.com/user/repo', task: `task ${i}`, model: 'openai/gpt-4o' },
+      })
+      await new Promise(resolve => setTimeout(resolve, 2))
+    }
+
+    const res = await app.inject({ method: 'GET', url: '/api/sessions' })
+    expect(res.statusCode).toBe(200)
+    const body = JSON.parse(res.payload)
+
+    // Must return exactly 20, not all 25
+    expect(body.sessions).toHaveLength(20)
+
+    // The returned sessions should be the 20 newest (by createdAt)
+    const createdAts = body.sessions.map((s: { createdAt: number }) => s.createdAt)
+    // Should be sorted descending
+    for (let i = 1; i < createdAts.length; i++) {
+      expect(createdAts[i - 1]).toBeGreaterThanOrEqual(createdAts[i])
+    }
+
+    // Verify the first (newest) and last (oldest among the 20) are correct
+    // Oldest returned should be the 6th created session (indices 0-4 are excluded)
+    expect(body.sessions[0].task).toBe('task 24')
+    expect(body.sessions[19].task).toBe('task 5')
+  })
+
   it('should get session by ID', async () => {
     const create = await app.inject({
       method: 'POST',
