@@ -188,4 +188,57 @@ describe('SessionManager', () => {
     const fetched = manager.getSession(session.id)
     expect(fetched!.githubToken).toBe('ghp_secret456')
   })
+
+  describe('listSessions limit', () => {
+    it('listSessions() with no arguments returns at most 20 sessions', async () => {
+      // Create 25 sessions
+      for (let i = 0; i < 25; i++) {
+        manager.createSession({
+          repoUrl: 'https://github.com/user/repo',
+          task: `task ${i}`,
+          model: 'openai/gpt-4o',
+        })
+      }
+
+      const list = manager.listSessions()
+      expect(list.length).toBeLessThanOrEqual(20)
+      // It should trim exactly to 20 (the newest)
+      expect(list).toHaveLength(20)
+    })
+
+    it('listSessions(5) with 8 sessions returns exactly the 5 newest', async () => {
+      for (let i = 0; i < 8; i++) {
+        manager.createSession({
+          repoUrl: 'https://github.com/user/repo',
+          task: `task ${i}`,
+          model: 'openai/gpt-4o',
+        })
+        // Small delay so timestamps differ
+        await new Promise(resolve => setTimeout(resolve, 2))
+      }
+
+      const list = manager.listSessions(5)
+      expect(list).toHaveLength(5)
+      // The 5 newest should be tasks 7,6,5,4,3 (reverse order)
+      expect(list[0].task).toBe('task 7')
+      expect(list[1].task).toBe('task 6')
+      expect(list[2].task).toBe('task 5')
+      expect(list[3].task).toBe('task 4')
+      expect(list[4].task).toBe('task 3')
+    })
+
+    it('listSessions(10) with 3 sessions returns all 3 (not padded)', async () => {
+      for (let i = 0; i < 3; i++) {
+        manager.createSession({
+          repoUrl: 'https://github.com/user/repo',
+          task: `task ${i}`,
+          model: 'openai/gpt-4o',
+        })
+        await new Promise(resolve => setTimeout(resolve, 2))
+      }
+
+      const list = manager.listSessions(10)
+      expect(list).toHaveLength(3)
+    })
+  })
 })

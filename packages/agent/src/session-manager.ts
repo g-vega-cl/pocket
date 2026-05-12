@@ -82,9 +82,11 @@ export class SessionManager {
     return this.sessions.get(id) ?? null
   }
 
-  listSessions(): SessionMeta[] {
+  listSessions(limit?: number): SessionMeta[] {
+    const effectiveLimit = limit ?? 20
     return Array.from(this.sessions.values())
       .sort((a, b) => b.createdAt - a.createdAt)
+      .slice(0, effectiveLimit)
       .map(s => ({ ...s }))
   }
 
